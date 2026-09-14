@@ -1,0 +1,70 @@
+{
+  "volume": 10522.995398,
+  "area": 10232.790257,
+  "bbox": {
+    "min": [
+      -45.0,
+      -25.0,
+      0.0
+    ],
+    "max": [
+      45.0,
+      25.0,
+      9.6
+    ],
+    "size": [
+      90.0,
+      50.0,
+      9.6
+    ],
+    "center": [
+      0.0,
+      0.0,
+      4.8
+    ]
+  },
+  "counts": {
+    "solids": 1,
+    "faces": 24,
+    "edges": 60,
+    "vertices": 40
+  },
+  "center_of_mass": [
+    -4.408292,
+    0.399126,
+    2.295354
+  ],
+  "mass": null,
+  "features": {
+    "pcb_sk": {
+      "faces_created": 0
+    },
+    "pcb": {
+      "faces_created": 6
+    },
+    "corners": {
+      "faces_created": 4
+    },
+    "holes": {
+      "faces_created": 0
+    },
+    "hole": {
+      "faces_created": 1
+    },
+    "mount_holes": {
+      "faces_created": 3
+    },
+    "sensor_sk": {
+      "faces_created": 0
+    },
+    "sensor": {
+      "faces_created": 5
+    },
+    "connector_sk": {
+      "faces_created": 0
+    },
+    "connector": {
+      "faces_created": 5
+    }
+  }
+}

@@ -1,0 +1,372 @@
+:root {
+  --bg: #1e2126; --bg2: #262a30; --bg3: #2e333a; --line: #3a4048; --fg: #d7dbe0; --fg2: #98a1ab;
+  --accent: #7fb2e6; --pick: #ff8c1a; --err: #e5534b; --warn: #e2b93b; --ok: #6cc07a;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+}
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; }
+body { background: var(--bg); color: var(--fg); font: 12px/1.4 var(--sans); overflow: hidden; }
+button, input, select { font: inherit; color: inherit; }
+.app { display: grid; grid-template-rows: 36px 1fr 220px 22px; height: 100%; }
+.toolbar { display: flex; align-items: center; gap: 8px; padding: 0 10px; background: var(--bg2); border-bottom: 1px solid var(--line); }
+.brand { font-weight: 600; letter-spacing: 0.02em; color: var(--accent); margin-right: 6px; }
+.toolbar select, .toolbar input { background: var(--bg3); border: 1px solid var(--line); border-radius: 3px; padding: 3px 6px; }
+.open-form { display: flex; gap: 4px; }
+.open-form input { width: 260px; }
+.spacer { flex: 1; }
+.btn-group { display: flex; gap: 2px; }
+.btn, .btn-small { background: var(--bg3); border: 1px solid var(--line); border-radius: 3px; padding: 3px 8px; cursor: pointer; }
+.btn-small { padding: 2px 7px; font-size: 11px; }
+.btn:hover, .btn-small:hover { border-color: var(--accent); }
+.btn-small.active { background: var(--accent); color: #111; border-color: var(--accent); }
+.btn-small.danger:hover { border-color: var(--err); color: var(--err); }
+.btn-row { display: flex; gap: 4px; margin: 6px 0; }
+.main { display: grid; grid-template-columns: 250px 1fr 300px; min-height: 0; }
+.left, .right { background: var(--bg2); overflow: auto; border-right: 1px solid var(--line); }
+.right { border-right: 0; border-left: 1px solid var(--line); }
+.tabs { display: flex; border-bottom: 1px solid var(--line); }
+.tabs button { flex: 1; background: transparent; border: 0; padding: 6px; color: var(--fg2); cursor: pointer; border-bottom: 2px solid transparent; }
+.tabs button.active { color: var(--fg); border-bottom-color: var(--accent); }
+.viewport { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: #2a2e33; }
+.viewport canvas { outline: none; }
+.viewport-badge { position: absolute; top: 8px; right: 8px; background: rgba(0,0,0,0.5); padding: 2px 8px; border-radius: 3px; font-size: 11px; }
+.viewport-hover { position: absolute; bottom: 8px; left: 8px; background: rgba(0,0,0,0.55); padding: 2px 8px; border-radius: 3px; font-family: var(--mono); font-size: 11px; pointer-events: none; }
+.tree-header { display: flex; align-items: center; gap: 6px; padding: 6px 8px 2px; color: var(--fg2); font-size: 10px; letter-spacing: 0.06em; }
+.tree-row { display: flex; align-items: center; gap: 6px; padding: 4px 8px; cursor: pointer; border-left: 3px solid transparent; }
+.tree-row:hover { background: var(--bg3); }
+.tree-row.selected { background: #33404d; border-left-color: var(--accent); }
+.tree-row.rolled-back { opacity: 0.45; }
+.tree-row.failed .tree-name { color: var(--err); }
+.tree-row.in-sketch { border-left-color: var(--warn); }
+.tree-icon { width: 14px; text-align: center; color: var(--fg2); }
+.tree-name { font-family: var(--mono); }
+.tree-kind { color: var(--fg2); font-size: 10px; flex: 1; }
+.tree-index { color: var(--fg2); font-size: 10px; width: 16px; text-align: right; }
+.tree-rollback { background: transparent; border: 0; color: var(--fg2); cursor: pointer; padding: 0 2px; opacity: 0; font-size: 11px; }
+.tree-row:hover .tree-rollback, .tree-rollback.here { opacity: 1; }
+.tree-rollback:hover { color: var(--accent); }
+.tree-row.rollback-end { box-shadow: inset 0 -2px var(--accent); }
+.tree-caption { padding: 2px 10px 4px; font-size: 10px; color: var(--fg2); }
+.tree-showall { margin: 6px 8px; }
+.tree-error { color: var(--err); padding: 4px 8px; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.badge { font-size: 9px; padding: 0 4px; border-radius: 2px; background: var(--bg3); color: var(--fg2); }
+.badge.err { background: var(--err); color: #fff; }
+.badge.warn { background: var(--warn); color: #111; }
+.panel-empty, .panel-help { color: var(--fg2); padding: 6px 8px; font-size: 11px; }
+.props { padding: 6px 0; }
+.props-title { display: flex; align-items: center; justify-content: space-between; padding: 4px 10px; font-size: 13px; }
+.props-error { color: var(--err); padding: 4px 10px; font-size: 11px; }
+.props-warn { color: var(--warn); padding: 2px 10px; font-size: 11px; }
+/* property rows share one two-column grid: labels left, values left, whatever the row kind */
+.fields { padding: 4px 10px; display: grid; grid-template-columns: 96px minmax(0, 1fr); column-gap: 8px; row-gap: 4px; align-items: center; }
+.fields > .panel-help, .fields > .props-error, .fields > .props-warn, .fields > .btn-row, .fields > .sketch-status, .fields > table,
+.fields > .section-title, .fields > .mono.refs, .fields > .pick-list, .fields > .tabs { grid-column: 1 / -1; }
+.field { display: contents; }
+.field > span { color: var(--fg2); }
+.field.check > input { justify-self: start; margin: 0; }
+.field.inline > select { min-width: 0; }
+.measure-row { display: contents; }
+.measure-row > span:last-child { font-family: var(--mono); font-size: 11px; min-width: 0; overflow-wrap: anywhere; line-height: 1.35; }
+.fields .btn-row { flex-wrap: wrap; }
+.fields .mono.refs { overflow-wrap: anywhere; white-space: normal; }
+select, .pick-select { background: var(--bg3); color: var(--fg); border: 1px solid var(--line); border-radius: 3px; }
+option { background: var(--bg2); color: var(--fg); }
+:root { color-scheme: dark; }
+.pick-field { display: contents; }
+.pick-field > .pick-label { color: var(--fg2); }
+.pick-field > .pick-value { display: inline; }
+.pick-field > button, .pick-field > select { justify-self: start; }
+.fields .pick-list { margin-left: 0; }
+.field input { flex: 1; min-width: 60px; background: var(--bg3); border: 1px solid var(--line); border-radius: 3px; padding: 3px 6px; font-family: var(--mono); }
+.field input:focus { border-color: var(--accent); outline: none; }
+.field.check > span { width: auto; color: var(--fg); }
+.entities { width: 100%; border-collapse: collapse; margin-top: 6px; }
+.entity-row td { vertical-align: top; padding: 4px 2px; border-top: 1px solid var(--line); }
+.entity-kind { color: var(--fg2); font-size: 10px; width: 44px; }
+.entity-name { font-family: var(--mono); width: 60px; }
+.entity-fields .field { margin: 2px 0; }
+.entity-fields .field > span { width: 56px; font-size: 10px; }
+.params { padding: 0; }
+.param-row { display: grid; grid-template-columns: 90px 1fr; gap: 2px 6px; padding: 4px 8px; align-items: center; border-bottom: 1px solid var(--line); }
+.param-name { font-family: var(--mono); }
+.param-value { background: var(--bg3); border: 1px solid var(--line); border-radius: 3px; padding: 2px 6px; font-family: var(--mono); min-width: 0; }
+.param-computed { grid-column: 2; color: var(--fg2); font-family: var(--mono); font-size: 10px; }
+.param-desc { grid-column: 2; color: var(--fg2); font-size: 10px; }
+.code-pane { display: flex; flex-direction: column; border-top: 1px solid var(--line); min-height: 0; }
+.code-header { display: flex; align-items: center; gap: 10px; padding: 3px 10px; background: var(--bg2); font-size: 11px; color: var(--fg2); }
+.code-state.dirty { color: var(--warn); }
+.code-external { color: var(--warn); display: flex; gap: 6px; align-items: center; }
+.code-host { flex: 1; min-height: 0; overflow: hidden; }
+.code-host .cm-editor { height: 100%; font-size: 12px; }
+.code-host .cm-scroller { font-family: var(--mono); }
+.cm-feature-span { background: rgba(127, 178, 230, 0.18) !important; }
+.cm-error-line { background: rgba(229, 83, 75, 0.25) !important; }
+.statusbar { display: flex; align-items: center; gap: 12px; padding: 0 10px; background: var(--bg2); border-top: 1px solid var(--line); font-size: 11px; color: var(--fg2); }
+.status-error { color: var(--err); }
+.status-hash { font-family: var(--mono); }
+.sketch-top { position: absolute; top: 8px; left: 8px; right: 8px; display: flex; flex-direction: column; align-items: stretch; gap: 4px; pointer-events: none; z-index: 2; }
+.sketch-top > * { pointer-events: auto; }
+.sketch-bar { display: flex; align-items: center; gap: 6px; background: rgba(20, 23, 27, 0.85); border: 1px solid var(--warn); border-radius: 4px; padding: 4px 8px; }
+.sketch-title { margin-right: 6px; }
+.sketch-hint { color: var(--fg2); flex: 1 1 160px; font-size: 11px; }
+.sketch-cursor { font-family: var(--mono); font-size: 11px; }
+/* assemblies, sections, measurements, views */
+.app.with-warning { grid-template-rows: 36px 24px 1fr 220px 22px; }
+.views-warning { background: #4a3a1a; color: var(--warn); padding: 2px 10px; font-size: 11px; display: flex; gap: 8px; align-items: center; }
+.views-select { max-width: 140px; }
+.itree-row { gap: 4px; }
+.itree-row.hidden-item .tree-name { opacity: 0.45; }
+.itree-toggle { width: 14px; background: transparent; border: 0; color: var(--fg2); cursor: pointer; padding: 0; text-align: center; }
+.itree-vis { margin: 0; }
+.swatch { display: inline-block; width: 11px; height: 11px; border-radius: 2px; border: 1px solid var(--line); vertical-align: middle; }
+.itree-glass { background: transparent; border: 0; color: var(--fg2); cursor: pointer; padding: 0 2px; }
+.itree-glass.on { color: var(--accent); }
+.tool-panel { position: absolute; top: 8px; left: 8px; display: flex; align-items: center; gap: 8px; background: rgba(20, 23, 27, 0.88); border: 1px solid var(--accent); border-radius: 4px; padding: 4px 8px; z-index: 2; }
+.tool-title { color: var(--accent); text-transform: uppercase; font-size: 10px; letter-spacing: 0.06em; }
+.tool-panel input[type=range] { width: 180px; }
+.tool-num { width: 64px; background: var(--bg3); border: 1px solid var(--line); border-radius: 3px; padding: 2px 6px; font-family: var(--mono); }
+.tool-check { display: flex; align-items: center; gap: 4px; }
+.tool-hint { position: absolute; top: 8px; left: 8px; background: rgba(20, 23, 27, 0.85); border: 1px solid #ffb14a; border-radius: 4px; padding: 4px 8px; font-size: 11px; z-index: 2; }
+.measure-row > span:first-child { color: var(--fg2); font-size: 11px; }
+.mono { font-family: var(--mono); }
+.measure-entity { padding: 4px 10px; border-top: 1px solid var(--line); }
+.measure-label { color: var(--accent); font-size: 11px; margin-bottom: 2px; }
+.measure-big { padding: 6px 10px; }
+.measure-distance { font-size: 22px; font-family: var(--mono); color: #ffb14a; }
+.measure-distance span { font-size: 12px; color: var(--fg2); }
+.pin-row { display: grid; grid-template-columns: 1fr auto; gap: 2px 6px; padding: 4px 10px; border-top: 1px solid var(--line); align-items: center; }
+.pin-row .pin-refs { grid-column: 1; color: var(--fg2); font-size: 10px; }
+.pin-row .btn-small { grid-row: 1 / span 2; }
+.status-section { color: #ffb14a; }
+
+.tool-status { font-size: 11px; opacity: 0.75; min-width: 5em; white-space: nowrap; }
+
+/* sketch editor */
+.sketch-warn { display: flex; gap: 12px; background: rgba(60, 30, 20, 0.85); border: 1px solid var(--err); border-radius: 4px; padding: 3px 8px; font-size: 11px; color: #ffb3a7; pointer-events: none; z-index: 2; }
+.context-bar { align-self: flex-start; display: flex; align-items: center; gap: 4px; background: rgba(20, 23, 27, 0.9); border: 1px solid var(--accent); border-radius: 3px; padding: 3px 6px; }
+.sketch-warn ~ .context-bar { top: 70px; }
+.context-sel { font-family: var(--mono); font-size: 11px; color: var(--fg2); margin-right: 6px; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sketch-bar { flex-wrap: wrap; row-gap: 3px; }
+.sketch-bar > .btn-small { white-space: nowrap; }
+.sketch-bar .sketch-hint { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.sketch-dof { font-size: 11px; color: var(--fg2); padding: 0 6px; white-space: nowrap; }
+.sketch-dof.ok { color: #7fe0a0; }
+.sketch-dof.bad { color: var(--err); }
+.sketch-labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.sketch-labels.passive .glyph, .sketch-labels.passive .dim-label { pointer-events: none; }
+.sketch-labels .glyph { position: absolute; pointer-events: auto; transform: translate(-50%, -50%); font-size: 11px; line-height: 14px; min-width: 14px; text-align: center; padding: 0 3px; border-radius: 2px; background: rgba(20, 23, 27, 0.75); color: #d8c27a; border: 1px solid rgba(216, 194, 122, 0.5); cursor: default; user-select: none; }
+.sketch-labels .glyph:hover { background: var(--accent); color: #111; }
+.sketch-labels .glyph.conflict { color: #fff; background: var(--err); }
+.sketch-labels .glyph.redundant { border-color: var(--warn); color: var(--warn); }
+.dim-label { position: absolute; pointer-events: auto; transform: translate(-50%, -50%); background: rgba(20, 23, 27, 0.9); border: 1px solid #d8c27a; color: #f2f5f7; border-radius: 3px; padding: 1px 6px; font-family: var(--mono); font-size: 11px; cursor: grab; user-select: none; white-space: nowrap; }
+.dim-label:hover { border-color: var(--accent); }
+.dim-label.conflict { border-color: var(--err); color: var(--err); }
+.dim-label.editing { cursor: default; padding: 2px 4px; }
+.dim-label.pending { border-color: var(--accent); }
+.dim-label .dim-expr { color: var(--fg2); }
+.dim-label .expr-input input { width: 90px; background: var(--bg3); border: 1px solid var(--line); border-radius: 2px; padding: 1px 4px; font-family: var(--mono); font-size: 11px; }
+.dim-alts { display: inline-flex; gap: 2px; margin-right: 4px; }
+.expr-input { position: relative; display: inline-flex; flex: 1; min-width: 0; }
+.expr-input input { width: 100%; min-width: 0; }
+.expr-suggest { position: absolute; top: 100%; left: 0; z-index: 20; margin: 2px 0 0; padding: 2px 0; list-style: none; background: var(--bg2); border: 1px solid var(--accent); border-radius: 3px; min-width: 120px; max-height: 160px; overflow: auto; font-family: var(--mono); font-size: 11px; }
+.expr-suggest li { padding: 2px 8px; cursor: pointer; }
+.expr-suggest li.active, .expr-suggest li:hover { background: var(--accent); color: #111; }
+.field .expr-input input { flex: 1; min-width: 60px; background: var(--bg3); border: 1px solid var(--line); border-radius: 3px; padding: 3px 6px; font-family: var(--mono); }
+.field .expr-input input:focus { border-color: var(--accent); outline: none; }
+.param-row .expr-input input { background: var(--bg3); border: 1px solid var(--line); border-radius: 3px; padding: 2px 6px; font-family: var(--mono); }
+.section-title { color: var(--fg2); text-transform: uppercase; font-size: 10px; letter-spacing: 0.06em; margin: 10px 0 2px; }
+.constraint-row .refs { font-size: 10px; color: var(--fg2); display: block; }
+.constraint-row.conflict .entity-name { color: var(--err); }
+.constraint-row.redundant .entity-name { color: var(--warn); }
+.constraint-row:hover { background: var(--bg3); }
+.dim-field { display: flex; align-items: center; gap: 6px; margin-top: 2px; }
+.dim-field .expr-input input { background: var(--bg3); border: 1px solid var(--line); border-radius: 3px; padding: 2px 6px; font-family: var(--mono); width: 110px; }
+.sketch-status { padding: 2px 0 6px; font-size: 11px; color: var(--fg2); }
+.sketch-status.ok { color: #7fe0a0; }
+
+/* reference planes, the plane dialog, confirmed delete */
+.tree-actions { display: flex; flex-wrap: wrap; gap: 4px; padding: 2px 8px 6px; border-bottom: 1px solid var(--line); }
+.tree-header .tree-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg); font-size: 12px; }
+.mode-chip { flex: none; padding: 1px 6px; border-radius: 9px; background: var(--bg3); color: var(--fg2); font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; }
+.asm-status { flex: none; display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--fg2); text-transform: none; }
+.asm-status.ok { color: var(--ok, #7fc97f); }
+.asm-status.bad { color: var(--err); }
+.asm-status.free { color: var(--warn); }
+.asm-status .info { border: 1px solid currentColor; border-radius: 50%; width: 14px; height: 14px; line-height: 12px; text-align: center; font-size: 10px; cursor: pointer; background: transparent; color: inherit; padding: 0; }
+.asm-status-pop { position: absolute; right: 8px; z-index: 30; margin-top: 4px; width: 230px; background: var(--bg2); border: 1px solid var(--line); border-radius: 4px; padding: 8px; font-size: 11px; box-shadow: 0 6px 18px rgba(0,0,0,0.4); text-transform: none; color: var(--fg); }
+.asm-status-pop div { margin: 2px 0; }
+.asm-status-pop .mono { color: var(--fg2); }
+.splitter { cursor: col-resize; background: var(--line); }
+.splitter:hover { background: var(--accent); }
+.plane-menu { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 4px 8px; border-bottom: 1px solid var(--line); background: var(--bg2); }
+.delete-wrap { position: relative; }
+.popover { position: absolute; right: 0; top: 24px; z-index: 5; width: 240px; background: var(--bg2); border: 1px solid var(--warn); border-radius: 4px; padding: 8px; font-size: 11px; box-shadow: 0 6px 18px rgba(0,0,0,0.4); }
+.popover .btn-row { margin: 8px 0 0; }
+.popover.left { right: auto; left: 0; }
+.tabs.small button { padding: 4px; font-size: 11px; }
+.pick-field .pick-label { color: var(--fg2); }
+.pick-field .pick-value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 11px; }
+.pick-field .pick-value.empty { color: var(--fg2); font-style: italic; }
+.pick-field .pick-select { background: var(--bg3); color: var(--fg); border: 1px solid var(--line); border-radius: 3px; font-size: 11px; max-width: 80px; }
+.pick-hint { border-color: #7fb2e6; }
+.btn-small.dashed { border-style: dashed; letter-spacing: -1px; font-weight: bold; }
+
+/* feature dialogs: lists of picked entities, inline choices */
+.pick-list { display: flex; flex-wrap: wrap; gap: 4px; margin: 2px 0 4px 76px; }
+.pick-chip { display: inline-flex; align-items: center; gap: 4px; padding: 1px 6px; border-radius: 10px; background: var(--bg3); font-family: var(--mono); font-size: 10px; max-width: 100%; }
+.pick-chip button { border: none; background: none; color: var(--fg2); cursor: pointer; padding: 0; font-size: 11px; }
+.pick-chip button:hover { color: var(--err); }
+/* an inline field sits on the panel grid like every other row: label left, select right */
+.field.inline { display: contents; }
+.field.inline > select { min-width: 0; max-width: 100%; justify-self: start; }
+.feature-menu { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px 8px; border-bottom: 1px solid var(--line); background: var(--bg2); }
+
+.sketch-offset-input { width: 52px; background: var(--bg3); border: 1px solid var(--line); border-radius: 3px; padding: 2px 5px; font-family: var(--mono); font-size: 11px; color: inherit; }
+
+/* assemblies */
+.tree-row.hidden-item .tree-name { opacity: 0.45; }
+.asm-summary.ok { color: var(--ok, #7fc97f); }
+.asm-summary.bad { color: var(--err); }
+.colour-field { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.colour-field input { flex: 1; min-width: 0; }
+table.bom td { padding: 2px 6px; white-space: nowrap; }
+table.bom td:last-child { text-align: right; }
+
+/* open documents as tabs */
+.doc-tabs { display: flex; align-items: stretch; gap: 2px; max-width: 55vw; overflow-x: auto; }
+.doc-tab { display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px 2px 10px; border: 1px solid var(--line); border-radius: 4px 4px 0 0; background: var(--bg2); color: var(--fg2); cursor: pointer; white-space: nowrap; font-size: 12px; }
+.doc-tab.active { background: var(--bg3); color: var(--fg); border-bottom-color: var(--bg3); }
+.doc-tab.empty { cursor: default; font-style: italic; }
+.doc-tab-close { border: none; background: none; color: var(--fg2); cursor: pointer; padding: 0 2px; font-size: 13px; line-height: 1; }
+.doc-tab-close:hover { color: var(--err); }
+.tree-row.tree-group { cursor: default; color: var(--fg2); font-style: italic; }
+
+/* drawings: the sheet */
+.sheet-host { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: #2a2e33; }
+.sheet-host svg.sheet { width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+.sheet-host svg.sheet.tool { cursor: crosshair; }
+.sheet-paper { fill: #fbfbf7; stroke: #777; stroke-width: 0.3; }
+.dwg-frame { stroke: #222; stroke-width: 0.5; fill: none; }
+.dwg-visible { stroke: #111; stroke-width: 0.45; fill: none; stroke-linecap: round; pointer-events: none; }
+.dwg-hidden { stroke: #7a7a7a; stroke-width: 0.25; stroke-dasharray: 2 1; fill: none; pointer-events: none; }
+.dwg-hatch { stroke: #555; stroke-width: 0.18; fill: none; pointer-events: none; }
+.dwg-section { stroke: #222; stroke-width: 0.5; stroke-dasharray: 6 1.5 1.5 1.5; fill: none; pointer-events: none; }
+.dwg-section-arrow { fill: #222; stroke: none; }
+.dwg-dim { stroke: #1c4f96; stroke-width: 0.25; fill: none; cursor: move; }
+.dwg-dim.selected { stroke: #ff8c1a; }
+.dwg-dim-arrow { fill: #1c4f96; stroke: none; }
+.dwg-dim.selected .dwg-dim-arrow { fill: #ff8c1a; }
+.dwg-dim .dwg-hit { stroke: transparent; stroke-width: 2; pointer-events: stroke; }
+.dwg-hit-dot { fill: transparent; cursor: move; }
+.dwg-text { fill: #111; font-family: Helvetica, Arial, sans-serif; pointer-events: none; user-select: none; }
+.dwg-dim-text { fill: #1c4f96; }
+.dwg-dim-text.selected { fill: #ff8c1a; }
+.dwg-label { fill: #333; }
+.dwg-note { cursor: move; }
+.dwg-note .dwg-text { pointer-events: all; }
+.dwg-note.selected .dwg-text { fill: #ff8c1a; }
+.dwg-pick { stroke: rgba(255, 140, 26, 0.0); stroke-width: 1.6; fill: none; cursor: pointer; pointer-events: stroke; }
+.dwg-pick:hover { stroke: rgba(255, 140, 26, 0.55); }
+.dwg-pick.picked { stroke: rgba(255, 140, 26, 0.9); }
+.dwg-view-hit { fill: transparent; cursor: move; }
+.dwg-view-hit:hover { fill: rgba(127, 178, 230, 0.08); }
+.dwg-selected-box { fill: none; stroke: var(--accent); stroke-width: 0.4; stroke-dasharray: 2 1; pointer-events: none; }
+.sheet-hint { display: flex; gap: 8px; align-items: center; max-width: calc(100% - 16px); }
+.sheet-hint .mono { color: var(--fg2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sheet-error { top: auto; bottom: 8px; border-color: var(--err); color: var(--err); }
+.note-text { width: 100%; min-width: 0; background: var(--bg3); border: 1px solid var(--line); border-radius: 3px; padding: 3px 6px; font-family: var(--sans); color: var(--fg); resize: vertical; }
+
+/* the heads-up bar in the viewport and the top bar's menus */
+.hud { position: absolute; bottom: 8px; right: 8px; display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; background: rgba(20, 23, 27, 0.85); border: 1px solid var(--line); border-radius: 4px; padding: 4px 6px; z-index: 2; max-width: calc(100% - 16px); }
+.hud select { background: var(--bg3); border: 1px solid var(--line); border-radius: 3px; padding: 2px 4px; font-size: 11px; }
+.menu { position: relative; display: inline-block; }
+.menu-pop { position: absolute; top: 100%; left: 0; margin-top: 2px; z-index: 40; display: flex; flex-direction: column; gap: 2px; min-width: 120px; background: var(--bg2); border: 1px solid var(--line); border-radius: 4px; padding: 4px; box-shadow: 0 6px 18px rgba(0,0,0,0.4); }
+.menu-pop .btn-small { text-align: left; }
+.btn-glyph { font-size: 15px; line-height: 1; padding: 1px 8px 3px; }
+
+/* the compare overlay's report */
+.compare-added { color: #6fcf82; }
+.compare-removed { color: #ef7a6a; }
+
+/* the parameters panel: the add row and the delete cross */
+.param-add input { min-width: 0; }
+.param-add .param-name { width: 7em; }
+.param-delete { margin-left: auto; }
+
+/* the error banner, the busy line, the status hint, the help overlay, the code pane handle */
+.main { position: relative; }
+.error-banner { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); z-index: 30; display: flex; align-items: center; gap: 8px; max-width: 70%; background: #3a1f1c; color: #ffb3a7; border: 1px solid var(--err); border-radius: 4px; padding: 4px 10px; font-size: 11px; box-shadow: 0 6px 18px rgba(0,0,0,0.4); }
+.error-banner .doc-tab-close { color: #ffb3a7; }
+.busy-line { position: absolute; top: 0; left: 0; right: 0; height: 2px; z-index: 3; background: linear-gradient(90deg, transparent, var(--accent), transparent); background-size: 40% 100%; background-repeat: no-repeat; animation: busy-slide 1s linear infinite; pointer-events: none; }
+@keyframes busy-slide { from { background-position: -40% 0; } to { background-position: 140% 0; } }
+.status-hash { position: absolute; left: -9999px; }
+.status-hint { color: var(--fg2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60vw; }
+.status-help-btn { padding: 0 6px; font-size: 11px; line-height: 14px; }
+.code-header { cursor: row-resize; user-select: none; }
+.code-header button { cursor: pointer; }
+.code-toggle { margin-left: auto; }
+.code-pane.closed .code-header { cursor: default; }
+.help-overlay { position: fixed; inset: 0; z-index: 100; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center; }
+.help-card { background: var(--bg2); border: 1px solid var(--line); border-radius: 6px; padding: 14px 18px 18px; max-width: 780px; max-height: 84vh; overflow: auto; box-shadow: 0 10px 30px rgba(0,0,0,0.5); font-size: 12px; }
+.help-card h2 { margin: 0 0 4px; font-size: 13px; display: flex; align-items: center; gap: 12px; }
+.help-card h3 { margin: 10px 0 4px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg2); }
+.help-card table { border-collapse: collapse; }
+.help-card td { padding: 2px 10px 2px 0; vertical-align: top; }
+.help-card td:first-child { white-space: nowrap; }
+.help-card kbd { font-family: var(--mono); background: var(--bg3); border: 1px solid var(--line); border-radius: 3px; padding: 0 4px; font-size: 11px; }
+.help-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 0 28px; }
+.tree-kind { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree-row.hovered { background: var(--bg3); }
+.entity-row.clickable { cursor: pointer; }
+.entity-row.clickable:hover { background: var(--bg3); }
+.entity-row.selected { background: #33404d; }
+.props .params { border-top: 0; }
+.props .param-row { padding: 3px 10px; }
+.props-problem { cursor: pointer; }
+.refs.hoverable { cursor: help; }
+.refs.hoverable:hover { color: var(--pick); }
+
+/* the right-click menu */
+.ctx-menu { position: fixed; z-index: 90; min-width: 170px; max-width: 260px; background: var(--bg2); border: 1px solid var(--line); border-radius: 4px; padding: 4px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); display: flex; flex-direction: column; font-size: 12px; }
+.ctx-title { padding: 2px 8px 4px; font-size: 10px; color: var(--fg2); text-transform: uppercase; letter-spacing: 0.05em; font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ctx-item { text-align: left; background: transparent; border: 0; border-radius: 3px; padding: 3px 8px; cursor: pointer; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ctx-item:hover:not(:disabled) { background: var(--accent); color: #111; }
+.ctx-item:disabled { color: var(--fg2); cursor: default; opacity: 0.6; }
+.ctx-item.danger { color: #ef7a6a; }
+.ctx-item.danger:hover:not(:disabled) { background: var(--err); color: #fff; }
+.ctx-sep { height: 1px; background: var(--line); margin: 3px 4px; }
+
+/* the open and new popovers */
+.files-pop { min-width: 300px; max-width: 420px; max-height: 70vh; overflow: auto; padding: 6px; gap: 2px; }
+.files-pop input, .files-pop select { width: 100%; background: var(--bg3); border: 1px solid var(--line); border-radius: 3px; padding: 3px 6px; font-family: var(--mono); min-width: 0; }
+.files-title { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg2); padding: 0 2px 2px; }
+.files-group { font-size: 10px; color: var(--fg2); padding: 6px 2px 2px; }
+.files-row { display: flex; justify-content: space-between; gap: 10px; width: 100%; text-align: left; background: transparent; border: 0; border-radius: 3px; padding: 3px 6px; cursor: pointer; color: var(--fg); }
+.files-row:hover { background: var(--accent); color: #111; }
+.files-row .files-kind { font-size: 10px; color: var(--fg2); }
+.files-row:hover .files-kind { color: #111; }
+.files-field { display: grid; grid-template-columns: 34px 1fr; align-items: center; gap: 6px; margin: 4px 0; }
+.files-field > span { color: var(--fg2); font-size: 11px; }
+
+/* sketch snapping */
+.snap-glyph { position: absolute; transform: translate(-50%, -50%); pointer-events: none; z-index: 3; font-size: 12px; line-height: 14px; min-width: 16px; text-align: center; padding: 0 3px; border-radius: 2px; background: rgba(20, 23, 27, 0.85); color: #ffd27a; border: 1px solid rgba(255, 210, 122, 0.6); }
+.props-problem:hover { text-decoration: underline; }
+
+/* parameter rows keep their delete cross on the row; side panels resize and collapse */
+.param-row { grid-template-columns: 90px minmax(0, 1fr) auto; }
+.param-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.param-delete { grid-column: 3; grid-row: 1; margin-left: 0; }
+.param-computed, .param-desc { grid-column: 2 / 4; }
+.left, .right { position: relative; }
+.side-toggle { position: absolute; top: 5px; right: 4px; z-index: 5; width: 14px; height: 14px; padding: 0; border: 1px solid var(--line); border-radius: 3px; background: var(--bg3); color: var(--fg2); font-size: 9px; line-height: 12px; cursor: pointer; }
+.side-toggle:hover { color: var(--fg); border-color: var(--accent); }
+.left .tree-header { padding-right: 24px; }
+.right > .side-toggle + * { margin-top: 0; }
+.left.collapsed, .right.collapsed { overflow: hidden; padding: 0; }
+.left.collapsed .side-toggle, .right.collapsed .side-toggle { right: 2px; left: 2px; width: auto; }
+/* a collapsed side keeps its splitter in the grid (a zero-width column) so the columns stay aligned */
+.splitter.off { pointer-events: none; }
+.side-toggle { width: 16px; height: 16px; font-size: 10px; line-height: 14px; top: 4px; }
+.left.collapsed .side-toggle, .right.collapsed .side-toggle { height: 44px; line-height: 42px; }
+.param-add .btn-small { grid-column: 1 / 4; justify-self: end; }  /* the button below the two inputs, so a narrow panel keeps the value field usable */

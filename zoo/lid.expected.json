@@ -1,0 +1,82 @@
+{
+  "volume": 31582.140681,
+  "area": 24622.614883,
+  "bbox": {
+    "min": [
+      -60.0,
+      -40.0,
+      -4.0
+    ],
+    "max": [
+      60.0,
+      40.0,
+      3.0
+    ],
+    "size": [
+      120.0,
+      80.0,
+      7.0
+    ],
+    "center": [
+      0.0,
+      0.0,
+      -0.5
+    ]
+  },
+  "counts": {
+    "solids": 1,
+    "faces": 50,
+    "edges": 124,
+    "vertices": 78
+  },
+  "center_of_mass": [
+    0.0,
+    0.0,
+    1.172729
+  ],
+  "mass": 32.845426,
+  "features": {
+    "plate_sk": {
+      "faces_created": 0
+    },
+    "plate": {
+      "faces_created": 6
+    },
+    "corners": {
+      "faces_created": 4
+    },
+    "skirt_sk": {
+      "faces_created": 0
+    },
+    "skirt": {
+      "faces_created": 14
+    },
+    "rim_sk": {
+      "faces_created": 0
+    },
+    "rim": {
+      "faces_created": 5
+    },
+    "rim_corners": {
+      "faces_created": 4
+    },
+    "pocket_sk": {
+      "faces_created": 0
+    },
+    "pocket": {
+      "faces_created": 5
+    },
+    "screw_sk": {
+      "faces_created": 0
+    },
+    "screw": {
+      "faces_created": 1
+    },
+    "screws": {
+      "faces_created": 3
+    },
+    "edge_break": {
+      "faces_created": 8
+    }
+  }
+}

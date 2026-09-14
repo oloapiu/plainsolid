@@ -1,0 +1,165 @@
+{
+  "sheet": {
+    "size": "A4",
+    "width": 297.0,
+    "height": 210.0,
+    "scale": 1.0
+  },
+  "views": {
+    "front": {
+      "visible": 8,
+      "hidden": 56,
+      "hatch": 0,
+      "bbox": [
+        35.0,
+        115.0,
+        95.0,
+        165.0
+      ],
+      "refs": 8
+    },
+    "top": {
+      "visible": 12,
+      "hidden": 26,
+      "hatch": 0,
+      "bbox": [
+        35.0,
+        42.0,
+        95.0,
+        82.0
+      ],
+      "refs": 12
+    },
+    "right": {
+      "visible": 18,
+      "hidden": 32,
+      "hatch": 0,
+      "bbox": [
+        130.0,
+        115.0,
+        170.0,
+        165.0
+      ],
+      "refs": 18
+    },
+    "iso": {
+      "visible": 45,
+      "hidden": 0,
+      "hatch": 0,
+      "bbox": [
+        213.483,
+        109.381,
+        266.517,
+        170.619
+      ],
+      "refs": 45
+    },
+    "section": {
+      "visible": 24,
+      "hidden": 0,
+      "hatch": 12,
+      "bbox": [
+        130.0,
+        41.0,
+        170.0,
+        91.0
+      ],
+      "refs": 0
+    }
+  },
+  "dimensions": {
+    "width": {
+      "kind": "distance",
+      "value": 60.0,
+      "text": "60"
+    },
+    "height": {
+      "kind": "distance",
+      "value": 50.0,
+      "text": "50"
+    },
+    "fillet": {
+      "kind": "radius",
+      "value": 3.0,
+      "text": "R3"
+    },
+    "chamfer": {
+      "kind": "angle",
+      "value": 45.0,
+      "text": "45\u00b0"
+    },
+    "depth": {
+      "kind": "distance",
+      "value": 40.0,
+      "text": "40"
+    },
+    "pitch": {
+      "kind": "distance",
+      "value": 30.0,
+      "text": "30"
+    },
+    "hole": {
+      "kind": "diameter",
+      "value": 5.0,
+      "text": "2\u00d7 \u00d85"
+    },
+    "wall": {
+      "kind": "distance",
+      "value": 4.0,
+      "text": "4"
+    },
+    "base": {
+      "kind": "distance",
+      "value": 4.0,
+      "text": "4"
+    }
+  },
+  "notes": 1,
+  "features": {
+    "front": {
+      "faces_created": 8
+    },
+    "top": {
+      "faces_created": 12
+    },
+    "right": {
+      "faces_created": 18
+    },
+    "iso": {
+      "faces_created": 45
+    },
+    "section": {
+      "faces_created": 24
+    },
+    "width": {
+      "faces_created": 0
+    },
+    "height": {
+      "faces_created": 0
+    },
+    "fillet": {
+      "faces_created": 0
+    },
+    "chamfer": {
+      "faces_created": 0
+    },
+    "depth": {
+      "faces_created": 0
+    },
+    "pitch": {
+      "faces_created": 0
+    },
+    "hole": {
+      "faces_created": 0
+    },
+    "wall": {
+      "faces_created": 0
+    },
+    "base": {
+      "faces_created": 0
+    },
+    "finish": {
+      "faces_created": 0
+    }
+  }
+}

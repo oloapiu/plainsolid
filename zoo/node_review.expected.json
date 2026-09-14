@@ -1,0 +1,44 @@
+{
+  "volume": 86403.539364,
+  "area": 19897.875899,
+  "bbox": {
+    "min": [
+      -30.0,
+      -23.0,
+      -15.0
+    ],
+    "max": [
+      30.0,
+      20.0,
+      35.0
+    ],
+    "size": [
+      60.0,
+      43.0,
+      50.0
+    ],
+    "center": [
+      0.0,
+      -1.5,
+      10.0
+    ]
+  },
+  "counts": {
+    "solids": 4,
+    "faces": 22,
+    "edges": 36,
+    "vertices": 24,
+    "instances": 4
+  },
+  "center_of_mass": [
+    0.0,
+    -1.537753,
+    1.041624
+  ],
+  "mass": null,
+  "features": {
+    "node": {
+      "faces_created": 22
+    }
+  }
+}

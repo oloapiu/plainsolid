@@ -1,0 +1,35 @@
+# python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+dist/
+build/
+*.egg-info/
+
+# node
+web/node_modules/
+web/dist/
+
+# plainsolid derived state
+.plainsolid-cache/
+corpus/
+
+# tests
+tests/**/actual_*.png
+playwright-report/
+test-results/
+
+# editors and os
+.DS_Store
+.idea/
+.vscode/
+
+# spike outputs (evidence is recorded in each RESULT.md)
+
+# built client bundled into the wheel by `npm run build` in web/
+src/plainsolid/static/
+
+# screenshots taken by verification scripts
+web/*.png

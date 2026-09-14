@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "camera": {
+    "position": [
+      130,
+      -165,
+      180
+    ],
+    "target": [
+      0,
+      0,
+      16
+    ],
+    "up": [
+      0,
+      0,
+      1
+    ],
+    "ortho": true
+  },
+  "section": null,
+  "pins": [],
+  "visibility": {},
+  "transparency": {},
+  "named": {},
+  "dims": {}
+}

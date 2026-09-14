@@ -1,0 +1,118 @@
+{
+  "volume": 62920.537991,
+  "area": 52257.636046,
+  "bbox": {
+    "min": [
+      -60.0,
+      -40.0,
+      0.0
+    ],
+    "max": [
+      60.0,
+      40.0,
+      40.0
+    ],
+    "size": [
+      120.0,
+      80.0,
+      40.0
+    ],
+    "center": [
+      -0.0,
+      -0.0,
+      20.0
+    ]
+  },
+  "counts": {
+    "solids": 1,
+    "faces": 86,
+    "edges": 201,
+    "vertices": 134
+  },
+  "center_of_mass": [
+    -0.077459,
+    -0.11314,
+    13.113208
+  ],
+  "mass": 65.43736,
+  "features": {
+    "outline": {
+      "faces_created": 0
+    },
+    "body": {
+      "faces_created": 6
+    },
+    "corners": {
+      "faces_created": 4
+    },
+    "hollow": {
+      "faces_created": 9
+    },
+    "lip_sk": {
+      "faces_created": 0
+    },
+    "rebate": {
+      "faces_created": 8
+    },
+    "boss_sk": {
+      "faces_created": 0
+    },
+    "boss": {
+      "faces_created": 2
+    },
+    "bosses": {
+      "faces_created": 6
+    },
+    "pilot_sk": {
+      "faces_created": 0
+    },
+    "pilot": {
+      "faces_created": 2
+    },
+    "pilots": {
+      "faces_created": 6
+    },
+    "standoff_sk": {
+      "faces_created": 0
+    },
+    "standoff": {
+      "faces_created": 2
+    },
+    "standoffs": {
+      "faces_created": 6
+    },
+    "standoff_pilot_sk": {
+      "faces_created": 0
+    },
+    "standoff_pilot": {
+      "faces_created": 2
+    },
+    "standoff_pilots": {
+      "faces_created": 6
+    },
+    "board_plane": {
+      "faces_created": 0
+    },
+    "glands": {
+      "faces_created": 0
+    },
+    "gland_cut": {
+      "faces_created": 2
+    },
+    "antenna_sk": {
+      "faces_created": 0
+    },
+    "antenna_cut": {
+      "faces_created": 1
+    },
+    "vent_sk": {
+      "faces_created": 0
+    },
+    "vent": {
+      "faces_created": 4
+    },
+    "vents": {
+      "faces_created": 20
+    }
+  }
+}

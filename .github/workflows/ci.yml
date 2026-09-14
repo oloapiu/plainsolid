@@ -1,0 +1,81 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Headless OpenGL for the stock vtk wheel (VTK 9.5+ renders offscreen without a display)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libopengl0 libgl1 libegl1 libxrender1
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+      - name: fast layers (unit, golden, roundtrip, solver)
+        run: uv run pytest -m "unit or golden or roundtrip or solver" -q
+      - name: full suite (everything but corpus)
+        run: uv run pytest -m "not corpus" -q
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: build the browser client into the Python package
+        run: cd web && npm ci && npm test && npm run build
+      - name: keep rendered PNGs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: renders
+          path: /tmp/pytest-of-runner/**/*.png
+          if-no-files-found: ignore
+
+  browser:
+    # L9: the client's workflow checks in a real Chromium against the served bundle
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libopengl0 libgl1 libegl1 libxrender1
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          # the server below runs under uv in the background; a cache prune at job end would wait on its lock
+          prune-cache: false
+      - run: uv sync --frozen
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: build the client and install Playwright's Chromium
+        run: cd web && npm ci && npm test && npm run build && npx playwright install --with-deps chromium
+      - name: serve a scratch copy of the zoo and run verify.mjs
+        run: |
+          mkdir -p /tmp/proj && cp -r zoo/* /tmp/proj/
+          uv run plainsolid serve /tmp/proj --port 8399 > /tmp/server.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:8399/api/health > /dev/null && break; sleep 1; done
+          for d in bracket.py node_review.py node.py; do
+            curl -sf -X POST http://127.0.0.1:8399/api/documents/open -H 'Content-Type: application/json' -d "{\"path\":\"$d\"}" > /dev/null
+          done
+          cd web && node verify.mjs http://127.0.0.1:8399/ /tmp/proj | tee /tmp/verify.log
+          ! grep -q '^FAIL' /tmp/verify.log
+      - name: stop the server
+        if: always()
+        run: pkill -f "plainsolid serve" || true
+      - name: keep screenshots and the server log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser
+          path: |
+            web/*.png
+            /tmp/server.log
+            /tmp/verify.log
+          if-no-files-found: ignore

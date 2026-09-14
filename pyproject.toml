@@ -1,0 +1,60 @@
+[project]
+name = "plainsolid"
+version = "0.0.1"
+description = "Minimal parametric CAD: a bidirectional GUI over a Python model file, on build123d"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "build123d>=0.11,<0.12",
+    "vtk>=9.4,<9.7",
+    "pyvista>=0.48",
+    "libcst>=1.9",
+    "numpy>=2",
+    "scipy>=1.18",
+    "fastapi>=0.141",
+    "uvicorn[standard]>=0.30",
+    "watchfiles>=1",
+    "typer>=0.15",
+    "ezdxf>=1.3",
+    "pillow>=11",
+    "reportlab>=5.0.1",
+    "svglib>=2.2.0",
+    "mcp>=2.2.0",
+]
+
+[project.scripts]
+plainsolid = "plainsolid.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pytest-timeout>=2",
+    "hypothesis>=6",
+    "ruff>=0.12",
+    "imagehash>=4.3",
+    "httpx>=0.28",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/plainsolid"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--strict-markers -q"
+timeout = 300
+markers = [
+    "unit", "golden", "roundtrip", "solver", "refs", "api", "cli", "io",
+    "render", "corpus", "perf", "agent",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint.per-file-ignores]
+"src/plainsolid/cli.py" = ["B008"]  # typer.Option in defaults is the typer idiom

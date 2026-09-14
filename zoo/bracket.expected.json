@@ -1,0 +1,64 @@
+{
+  "volume": 16203.097396,
+  "area": 9599.743257,
+  "bbox": {
+    "min": [
+      -30.0,
+      -40.0,
+      0.0
+    ],
+    "max": [
+      30.0,
+      0.0,
+      50.0
+    ],
+    "size": [
+      60.0,
+      40.0,
+      50.0
+    ],
+    "center": [
+      0.0,
+      -20.0,
+      25.0
+    ]
+  },
+  "counts": {
+    "solids": 1,
+    "faces": 20,
+    "edges": 54,
+    "vertices": 36
+  },
+  "center_of_mass": [
+    -11.711181,
+    -20.0,
+    12.343375
+  ],
+  "mass": 43.748363,
+  "features": {
+    "profile": {
+      "faces_created": 0
+    },
+    "body": {
+      "faces_created": 8
+    },
+    "inner": {
+      "faces_created": 1
+    },
+    "outer": {
+      "faces_created": 1
+    },
+    "holes": {
+      "faces_created": 0
+    },
+    "hole_cut": {
+      "faces_created": 2
+    },
+    "slots": {
+      "faces_created": 0
+    },
+    "slot_cut": {
+      "faces_created": 8
+    }
+  }
+}

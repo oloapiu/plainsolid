@@ -1,0 +1,131 @@
+{
+  "volume": 235149.416578,
+  "area": 136997.550873,
+  "bbox": {
+    "min": [
+      -120.0,
+      -41.5,
+      0.0
+    ],
+    "max": [
+      130.5,
+      56.0,
+      97.330127
+    ],
+    "size": [
+      250.5,
+      97.5,
+      97.330127
+    ],
+    "center": [
+      5.25,
+      7.25,
+      48.665064
+    ]
+  },
+  "counts": {
+    "solids": 8,
+    "faces": 238,
+    "edges": 559,
+    "vertices": 367,
+    "instances": 8
+  },
+  "center_of_mass": [
+    -3.745947,
+    5.146299,
+    41.772592
+  ],
+  "mass": 426.350742,
+  "dof": 3,
+  "free": [
+    "gland1",
+    "gland2",
+    "antenna"
+  ],
+  "features": {
+    "box": {
+      "faces_created": 86
+    },
+    "lid": {
+      "faces_created": 50
+    },
+    "board": {
+      "faces_created": 24
+    },
+    "bracket": {
+      "faces_created": 20
+    },
+    "gland1": {
+      "faces_created": 16
+    },
+    "gland2": {
+      "faces_created": 16
+    },
+    "antenna": {
+      "faces_created": 10
+    },
+    "panel": {
+      "faces_created": 16
+    },
+    "anchor": {
+      "faces_created": 0
+    },
+    "board_down": {
+      "faces_created": 0
+    },
+    "board_x": {
+      "faces_created": 0
+    },
+    "board_y": {
+      "faces_created": 0
+    },
+    "lid_down": {
+      "faces_created": 0
+    },
+    "lid_x": {
+      "faces_created": 0
+    },
+    "lid_y": {
+      "faces_created": 0
+    },
+    "bracket_wall": {
+      "faces_created": 0
+    },
+    "bracket_floor": {
+      "faces_created": 0
+    },
+    "bracket_mid": {
+      "faces_created": 0
+    },
+    "gland1_axis": {
+      "faces_created": 0
+    },
+    "gland1_seat": {
+      "faces_created": 0
+    },
+    "gland2_axis": {
+      "faces_created": 0
+    },
+    "gland2_seat": {
+      "faces_created": 0
+    },
+    "antenna_seat": {
+      "faces_created": 0
+    },
+    "antenna_mid": {
+      "faces_created": 0
+    },
+    "antenna_up": {
+      "faces_created": 0
+    },
+    "panel_hinge": {
+      "faces_created": 0
+    },
+    "panel_tilt": {
+      "faces_created": 0
+    },
+    "panel_mid": {
+      "faces_created": 0
+    }
+  }
+}
