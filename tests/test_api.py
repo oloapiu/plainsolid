@@ -256,3 +256,12 @@ def test_kernel_work_is_serialized_across_documents(client, monkeypatch):
         codes = list(pool.map(lambda i: client.get(f"/api/documents/{i}/tree").status_code, ids))
     assert codes == [200, 200]
     assert peak == 1
+
+
+def test_open_a_sub_assembly_of_a_step_file(client):
+    tree = client.post("/api/documents/open", json={"path": "vendor/node_stub.step#node.glands"}).json()
+    assert tree["kind"] == "assembly" and [r["node"] for r in tree["evaluation"]["instances"]] == ["node.glands"]
+    docs = client.get("/api/documents").json()
+    assert [d["name"] for d in docs] == ["glands"] and docs[0]["path"].endswith("vendor/node_stub.glands.py")
+    r = client.post("/api/documents/open", json={"path": "vendor/node_stub.step#lid"})
+    assert r.status_code == 400 and "no node 'lid'" in r.text

@@ -244,3 +244,75 @@ def test_make_editable_preserves_quoted_step_path(zoo_dir, tmp_path):
     assert evaluate(part).body.volume > 0
     # Looking up the same product finds the generated wrapper, even with quotes.
     assert ws._part_file_for(doc, 'another', step.name, None) == Path(result['part'])
+
+
+def _unit_step(folder: Path) -> Path:
+    """A box with a two-pin sub-assembly placed at (0, 30, 20) and turned 90 degrees about X."""
+    from build123d import Box, Compound, Cylinder, Location, export_step
+
+    box = Box(40, 40, 10)
+    box.label = "box"
+    pins = []
+    for i, x in enumerate((-10, 10), 1):
+        pin = Cylinder(3, 8).moved(Location((x, 0, 5)))
+        pin.label = f"pin_{i}"
+        pins.append(pin)
+    sub = Compound(children=pins)
+    sub.label = "pins"
+    sub.location = Location((0, 30, 20), (90, 0, 0))
+    unit = Compound(children=[box, sub])
+    unit.label = "unit"
+    export_step(unit, folder / "unit.step")
+    return folder / "unit.step"
+
+
+@pytest.mark.io
+def test_a_sub_assembly_node_shows_in_its_own_coordinates(tmp_path):
+    """`file.step#node` names a sub-assembly in its own frame, for the viewer and for the instances it explodes into."""
+    _unit_step(tmp_path)
+    whole = read_step(tmp_path / "unit.step")
+    assert tuple(select_node(whole, "pin_1").shape.bounding_box().center()) == pytest.approx((-10, 25, 20), abs=1e-6)  # where the file puts it
+    (tmp_path / "pins.py").write_text(HEAD + 'meta(kind="assembly", name="pins")\np = import_step("p", "unit.step#pins")\n')
+    ws = Workspace(tmp_path)
+    doc = ws.open(tmp_path / "pins.py")
+    ev = doc.ensure_evaluated()
+    assert ev.result("p").ok
+    [root] = ev.instances
+    assert (root.path, root.node, root.file) == ("p", "unit.pins", str(tmp_path / "unit.step"))
+    assert [(c.path, c.node) for c in root.children] == [("p.pin_1", "unit.pins.pin_1"), ("p.pin_2", "unit.pins.pin_2")]
+    assert [row[3] for row in root.transform[:3]] == pytest.approx([0, 0, 0], abs=1e-9)
+    assert [row[3] for row in root.children[0].transform[:3]] == pytest.approx([-10, 0, 5], abs=1e-9)
+    centres = [tuple(c.shape.bounding_box().center()) for c in root.children]
+    assert centres == [pytest.approx((-10, 0, 5), abs=1e-6), pytest.approx((10, 0, 5), abs=1e-6)]
+    # made editable, the instances are posed where the viewer showed them
+    ws.apply(doc, {"op": "explode_import", "feature": "p"}, doc.hash)
+    assert [ln for ln in doc.source.splitlines() if "instance(" in ln] == [
+        'pin_1 = instance("pin_1", "unit.step#unit.pins.pin_1", at=(-10, 0, 5))',
+        'pin_2 = instance("pin_2", "unit.step#unit.pins.pin_2", at=(10, 0, 5))',
+    ]
+    assert [tuple(p.shape.bounding_box().center()) for p in doc.ensure_evaluated().posed] == [pytest.approx(c, abs=1e-6) for c in centres]
+    # a part made of one node takes the node's own frame, as before
+    (tmp_path / "p1.py").write_text(HEAD + 'meta(name="p1")\nbody = import_step("body", "unit.step#pins.pin_1")\n')
+    ev = evaluate(parse_file(str(tmp_path / "p1.py")))
+    assert ev.result("body").ok and tuple(ev.body.bounding_box().center()) == pytest.approx((0, 0, 0), abs=1e-6)
+
+
+@pytest.mark.api
+def test_open_a_sub_assembly_of_a_step_file_as_a_document_of_its_own(project):
+    ws = Workspace(project)
+    doc = ws.open("vendor/node_stub.step#glands")  # a short fragment names the node; the wrapper spells the full path
+    wrapper = project / "vendor" / "node_stub.glands.py"
+    assert doc.path == wrapper and doc.document.kind == "assembly"
+    assert wrapper.read_text() == 'from plainsolid import *\n\nmeta(kind="assembly", name="glands")\n\nglands = import_step("glands", "node_stub.step#node.glands")\n'
+    [root] = doc.tree_json()["evaluation"]["instances"]
+    assert root["node"] == "node.glands" and root["file"] == str(project / "vendor" / "node_stub.step")
+    assert [(c["path"], c["node"]) for c in root["children"]] == [("glands.gland_1", "node.glands.gland_1"), ("glands.gland_2", "node.glands.gland_2")]
+    assert ws.open("vendor/node_stub.step#node.glands") is doc  # the same node is the same document
+    assert ws.open("vendor/node_stub.step#node").path == project / "vendor" / "node_stub.py"  # the root is the whole file
+    assert {"path": "vendor/node_stub.glands.py", "kind": "assembly"} in ws.files()
+    with pytest.raises(ValueError, match="no node 'lid'"):
+        ws.open("vendor/node_stub.step#lid")
+    with pytest.raises(ValueError, match="only a STEP file"):
+        ws.open("node.py#glands")
+    assert wrapper_source("node_stub.step", "part", "node.glands.gland_1") == 'from plainsolid import *\n\nmeta(name="gland_1")\n\nbody = import_step("body", "node_stub.step#node.glands.gland_1")\n'
+    assert step_kind(project / "vendor" / "node_stub.step", "node.glands.gland_1") == "part"

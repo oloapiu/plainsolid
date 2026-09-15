@@ -55,6 +55,7 @@ export interface Instance {
   transform?: number[][] | null;   // 4x4 row-major world pose (instance features and imported nodes)
   file?: string | null;            // the part or STEP file an instance feature loaded
   kind?: string;                   // part | step
+  node?: string | null;            // the node's path inside its STEP file (imported trees)
 }
 
 /** What the pose solver found for an assembly document. */

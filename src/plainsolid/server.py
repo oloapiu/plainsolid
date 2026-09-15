@@ -233,6 +233,8 @@ def create_app(root: str | Path | None = None, serve_client: bool = True) -> Fas
             doc = ws.open(req.path)
         except FileNotFoundError:
             raise HTTPException(404, f"no such file: {req.path}") from None
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from None
         return await run(doc.tree_json)
 
     @app.post("/api/documents/new")

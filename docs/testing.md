@@ -167,8 +167,8 @@ files live in `corpus/` (gitignored) and feed only L10 and the bench script.
   picking, property and parameter edits, undo, feature dialogs with previews,
   cascade delete, sketch mode, external edits, snapshot, the compare overlay,
   context menus, assemblies, sections, measurements, named views, STEP
-  viewing and make editable, tabs, the drawing sheet, panel layout, and no
-  console errors. Screenshots land in `web/*.png` for inspection only. It
+  viewing, a sub-assembly in a tab of its own, make editable, tabs, the
+  drawing sheet, panel layout, and no console errors. Screenshots land in `web/*.png` for inspection only. It
   exits 1 on any failed check.
 - **L10 corpus.** Every STEP file in `corpus/` imports with unique instance
   paths, wraps into a document that evaluates and meshes, sections at three

@@ -12,6 +12,7 @@ import { MATE_KINDS, TOOL_KINDS, VIEW_DIRECTIONS, DIMENSION_KINDS, type CompareR
 import { MeasurePanel } from './MeasurePanel';
 import { ExprInput } from './ExprInput';
 import { GLYPH } from '../sketch/model';
+import { subAssemblyOf, openSubAssembly } from '../menu/entries';
 
 function parseValue(text: string): EditValue {
   const t = text.trim();
@@ -78,6 +79,7 @@ export function PropertyPanel() {
     const visible = leaves.some((p) => visibility[p] ?? true);
     const transparent = leaves.every((p) => transparency[p] ?? false);
     const color = inst.color ? `rgb(${inst.color.slice(0, 3).map((c) => Math.round(c * 255)).join(',')})` : null;
+    const sub = inst.children.length ? subAssemblyOf(inst) : null;
     return (
       <div className="props" data-testid="instance-props">
         <div className="props-title"><span>{inst.children.length ? 'assembly' : 'instance'} <b>{inst.name}</b></span></div>
@@ -90,7 +92,8 @@ export function PropertyPanel() {
           {selectedFace !== null && <div className="measure-row"><span>face</span><span className="mono">{selectedFace}</span></div>}
           <BoolField label="visible" value={visible} onCommit={(v) => leaves.forEach((p) => setVisibility(p, v))} />
           <BoolField label="transparent" value={transparent} onCommit={(v) => leaves.forEach((p) => setTransparency(p, v))} />
-          <div className="panel-help">a body of the STEP file: "make editable" in the tree header turns the file's bodies into instances that can be moved and edited</div>
+          {sub && <div className="btn-row"><button className="btn" onClick={() => openSubAssembly(sub)} title="open this sub-assembly in a tab of its own, in its own coordinates" data-testid="open-sub-assembly">open sub-assembly</button></div>}
+          <div className="panel-help">{inst.children.length ? 'a sub-assembly of the STEP file' : 'a body of the STEP file'}: "make editable" in the tree header turns the file's bodies into instances that can be moved and edited</div>
         </div>
       </div>
     );

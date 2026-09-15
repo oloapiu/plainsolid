@@ -4,6 +4,7 @@ preferred over the product label so shared geometry keeps distinct names.
 """
 from __future__ import annotations
 
+import copy
 import os
 import re
 import unicodedata
@@ -49,6 +50,8 @@ class Instance:
     file: str | None = None  # the part or STEP file an instance feature loaded
     kind: str = "step"  # part | step
     local_shape: Shape | None = None  # the product's own geometry, before its location in the file
+    node: str | None = None  # the node's path inside its STEP file, kept when a document renames the tree
+    loc: Location | None = field(default=None, repr=False, compare=False)  # where the file places the node
     index: dict[str, Instance] | None = field(default=None, repr=False, compare=False)  # path -> node, built on demand
 
     @property
@@ -70,7 +73,7 @@ class Instance:
             "assembly": self.is_assembly,
             "solids": len(self.shape.solids()) if self.shape is not None else 0,
             "children": [c.to_json() for c in self.children],
-            "transform": self.transform, "file": self.file, "kind": self.kind,
+            "transform": self.transform, "file": self.file, "kind": self.kind, "node": self.node,
         }
 
 
@@ -177,7 +180,7 @@ def read_step(path: str | os.PathLike) -> Instance:
             path_ = f"{parent_path}.{name}" if parent_path else name
             color = _label_color(lab) or _label_color(ref)
             inst = Instance(name=name, product=prod_name or inst_name, path=path_, color=color,
-                            transform=_matrix(loc))
+                            transform=_matrix(loc), node=path_, loc=loc)
             if shape_tool.IsAssembly_s(ref):
                 inst.children = walk(ref, loc, path_)
             else:
@@ -195,17 +198,42 @@ def read_step(path: str | os.PathLike) -> Instance:
         raise ImportError_(f"{path.name} contains no shapes")
     if len(roots) == 1:
         return roots[0]
-    root = Instance(name=unique(path.stem), product=path.stem, path=path.stem, transform=_matrix(Location()))
+    root = Instance(name=unique(path.stem), product=path.stem, path=path.stem, transform=_matrix(Location()),
+                    loc=Location())
     for r in roots:
         _reparent(r, root.path)
     root.children = roots
+    root.node = root.path
     return root
 
 
 def _reparent(inst: Instance, prefix: str) -> None:
-    inst.path = f"{prefix}.{inst.path}"
+    inst.path = inst.node = f"{prefix}.{inst.path}"
     for c in inst.children:
         _reparent(c, prefix)
+
+
+def relocated(node: Instance) -> Instance:
+    """A copy of a node's subtree in the node's own coordinates: the node at the
+    origin, its parts where it places them. What `file.step#node` means."""
+    if node.loc is None:
+        return node
+    inv = node.loc.inverse()
+
+    def fix(n: Instance) -> Instance:
+        c = copy.copy(n)
+        c.index = None
+        c.loc = inv * n.loc if n.loc is not None else None
+        if c.loc is not None:
+            c.transform = _matrix(c.loc)
+        if n.local_shape is not None and c.loc is not None:
+            c.shape = n.local_shape.moved(c.loc)
+        elif n.shape is not None:
+            c.shape = n.shape.moved(inv)
+        c.children = [fix(ch) for ch in n.children]
+        return c
+
+    return fix(node)
 
 
 def _cast(topo) -> Shape:

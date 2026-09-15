@@ -21,18 +21,25 @@ from .edit import EditError
 from .evaluate import evaluate
 from .parse import parse_file
 from .selectors import SelectorError
+from .stepimport import split_fragment
 from .workspace import StaleHashError, Workspace
 
 GUIDE = Path(__file__).parent / "agent.md"
 
 
 def _open(file: Path):
-    """Open a model file or a STEP file (which gets a wrapper model file)."""
+    """Open a model file or a STEP file (which gets a wrapper model file);
+    `x.step#node` opens one sub-assembly of the file."""
+    text, node = split_fragment(str(file))
+    file = Path(text)
     if not file.exists():
         _fail(f"no such file: {file}")
     file = file.resolve()
     ws = Workspace(file.parent)
-    return ws, ws.open(file)
+    try:
+        return ws, ws.open(f"{file}#{node}" if node else file)
+    except ValueError as exc:
+        _fail(str(exc))
 
 
 def _section_opt(plane: str | None, offset: float, flip: bool):

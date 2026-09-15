@@ -5,7 +5,7 @@ import {
   openContextMenu,
   type FeatureDialogKind,
 } from '../state/store';
-import { featureRowMenu } from '../menu/entries';
+import { featureRowMenu, stepGroupMenu } from '../menu/entries';
 
 /** A right-click on a row selects it and opens its menu. */
 function rowContext(e: React.MouseEvent, f: Feature) {
@@ -266,7 +266,13 @@ export function AssemblyTree({ tree, selected }: { tree: Tree; selected: string 
         return (
           <div key={f.name}>
             {isInst && group && group !== prevGroup && (
-              <div className="tree-row tree-group" style={{ paddingLeft: 8 + (depth - 1) * 14 }} title={`bodies of ${group} in ${String(f.args.path).split('#')[0]}`}>
+              <div className="tree-row tree-group" style={{ paddingLeft: 8 + (depth - 1) * 14 }} title={`bodies of ${group} in ${String(f.args.path).split('#')[0]} · right-click for actions`} data-testid={`group-${group}`}
+                   onContextMenu={(e) => {
+                     e.preventDefault();
+                     const file = String(f.args.path).split('#')[0];
+                     const members = tree.features.filter((x) => x.kind === 'instance' && String(x.args.path).startsWith(`${file}#${group}.`));
+                     openContextMenu(e.clientX, e.clientY, stepGroupMenu(group, members), group.split('.').pop() ?? group);
+                   }}>
                 <span className="tree-icon">⬚</span><span className="tree-name">{group.split('.').pop()}</span><span className="tree-kind">{group}</span>
               </div>
             )}

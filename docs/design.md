@@ -99,7 +99,7 @@ multi-body parts.
 | Poses | Each instance statement carries its pose (`at=`, `rotate=` in degrees about X, Y, Z in build123d's Location sense). After every edit the solved poses are written back at four decimals, like sketch coordinates, so the file holds what is shown. |
 | Mates | fixed, coincident, concentric, distance, parallel, angle. References are in the part's own coordinates: `lid.faces.of("plate").bottom`, `gland.faces.where(kind="cylinder").largest()`, `box.planes.XZ`, `gland.axes.Z`. Two body faces mate face to face; planes, axes and points align; `flip=True` reverses. The GUI picks the orientation that turns the parts less when a mate is added and writes it as an explicit `flip=`. |
 | Vendor geometry | Geometric predicates only, since it carries no semantic names. Vendor files are never modified in place; a part file that imports a STEP node and adds cuts is the path for that. |
-| STEP nodes | `"vendor/node.step#node.glands.gland_1"` names one body inside a STEP file, in that body's own coordinates, for `instance` and `import_step` alike. A review import turns into such instances on the first "make editable"; a body gets a part file wrapping its node, and every instance of the same product follows that part. No STEP file is ever split or rewritten. |
+| STEP nodes | `"vendor/node.step#node.glands.gland_1"` names one body inside a STEP file, in that body's own coordinates, for `instance` and `import_step` alike. A sub-assembly node imported into an assembly document is a review of that sub-assembly in its own coordinates. A review import turns into such instances on the first "make editable"; a body gets a part file wrapping its node, and every instance of the same product follows that part. No STEP file is ever split or rewritten. |
 | Solver | Six degrees of freedom per instance, mate residuals, the same least-squares core as sketches. The first fixed instance anchors the assembly. Under-constrained instances stay nearest their current pose. Wholly redundant and conflicting mates are warnings on the mate, never errors. |
 | Colour | On the part, with a per-instance override. Colour is the only styling. |
 | Mass | Density from a material name in a small built-in table or an explicit number. |
@@ -110,7 +110,7 @@ multi-body parts.
 
 | Decision | Choice |
 |---|---|
-| STEP import | Preserves hierarchy, names and colours as a clickable instance tree. Opening a foreign STEP creates a wrapper model file next to it: a part when the file holds one solid, a review assembly otherwise. plainsolid walks the XCAF document itself, naming each node from the component label first and the product label second, because build123d's importer uses only the product name and so collapses instances of shared geometry. |
+| STEP import | Preserves hierarchy, names and colours as a clickable instance tree. Opening a foreign STEP creates a wrapper model file next to it: a part when the file holds one solid, a review assembly otherwise. plainsolid walks the XCAF document itself, naming each node from the component label first and the product label second, because build123d's importer uses only the product name and so collapses instances of shared geometry. A sub-assembly of the file opens in a tab of its own from its row's menu, and after "make editable" from the grey group row above its bodies or from a body's own menu: it gets a wrapper named after the node (`node.glands.py` next to `node.step`, importing `node.step#node.glands`) and shows in its own coordinates, with a sidecar of its own. |
 | Sections | One active plane, from any standard plane, reference plane or planar face plus offset, with a slider. Applies to everything visible; cut faces are capped. |
 | Measurements | Point to point, minimum distance between any two entities, edge length, circle diameter and centre, angle between faces or edges, x/y/z components. Pinnable so they stay on screen. |
 | Snapshot | The current viewport including pins and section, to the clipboard and to a PNG file. |
@@ -316,7 +316,7 @@ or an existing file, 422 for a malformed request.
 GET    /health
 GET    /documents                              open documents with their kind
 GET    /files                                  model and STEP files under the project
-POST   /documents/open       {path}            a .py, or a .step which gets a wrapper
+POST   /documents/open       {path}            a .py, a .step which gets a wrapper, or .step#node for one sub-assembly of it
 POST   /documents/{id}/close
 POST   /documents/new        {path, kind, name, material, of}
 GET    /documents/{id}/tree                    features with results, constraints, planes, dependants,

@@ -179,7 +179,10 @@ Opening a `.step` file creates a small wrapper model file next to it, so the
 review is a text document like everything else. Instance names, hierarchy and
 colours come through; view state (camera, section, pins, named views) lives
 in a `<name>.views.json` sidecar. A STEP file holding one solid opens as a
-part, ready to sketch on and cut.
+part, ready to sketch on and cut. Right-click a sub-assembly in the tree,
+before or after making the file editable, to open it in a tab of its own: it
+gets a wrapper named after the node (`node_v3.glands.py`) and shows in its
+own coordinates.
 
 To modify a proposal, press "make editable" in the tree header: the import
 turns into one instance per body, each pointing into the same STEP file

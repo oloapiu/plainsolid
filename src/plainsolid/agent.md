@@ -169,7 +169,7 @@ sketches still build geometry from the solved coordinates.
 | circular_pattern | `circular_pattern("p", feature, count, axis=Z or an edge or cylindrical face selector, angle=360)` |
 | mirror | `mirror("m", feature or None for the whole body, about=YZ or a plane feature or a planar face)` |
 | plane | `plane("p", XY, offset=10)`, `plane("p", body.faces.top, offset=5)`, `plane("p", XY, angle=30, about=edge_selector)`, `plane("p", between=(a, b))`, `plane("p", through=(v1, v2, v3))` |
-| import_step | `import_step("v", "vendor/file.step", tolerance=None)` an opaque body |
+| import_step | `import_step("v", "vendor/file.step", tolerance=None)` an opaque body; `"vendor/file.step#node.sub"` one node of the file in its own coordinates (a sub-assembly node only in an assembly document, as a review of it) |
 
 A part has one body: a cut that splits it is an error. Fillet and chamfer
 consume the edges they round, so a selector for those edges resolves only up

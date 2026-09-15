@@ -88,6 +88,8 @@ export function featureRowMenu(f: Feature): MenuEntry[] {
     out.push(item('mate from here…', () => openFeatureDialog('mate'), { title: 'pick a face of this instance first, or in the dialog' }));
     if (root?.kind === 'part' && root.file) out.push(item('open part', () => void openDocument(root.file!)));
     if (root?.kind === 'step' && root.solids === 1 && !f.read_only) out.push(item('edit part', () => void makeEditable({ instance: f.name })));
+    const group = stepGroupOf(f);
+    if (group) out.push(item(`open ${group.name}`, () => void openDocument(`${group.file}#${group.node}`), { title: `the sub-assembly ${group.node} of the file, in a tab of its own` }));
     return [...out, ...featureTail(f, false)];
   }
   if (f.kind === 'import_step') {
@@ -114,11 +116,47 @@ export function featureRowMenu(f: Feature): MenuEntry[] {
 export function viewerNodeMenu(inst: Instance): MenuEntry[] {
   const tree = getState().tree;
   const imports = (tree?.features ?? []).filter((f) => f.kind === 'import_step');
+  const sub = subAssemblyOf(inst);
   return [
     ...visibilityEntries(leafPaths(inst)),
     SEP,
+    ...(sub ? [item(sub === inst ? 'open sub-assembly' : `open ${sub.name}`, () => openSubAssembly(sub), { title: 'in a tab of its own, in its own coordinates' })] : []),
     item('make editable', () => { for (const f of imports) void explodeImport(f.name); }, { title: 'the file\'s bodies become instances of an assembly', disabled: !imports.length }),
   ];
+}
+
+/** The node of a STEP file an instance came out of (`file.step#root.sub.body` sits in `root.sub`),
+ * when that node is a sub-assembly and not the file's root. The file is the absolute path the evaluation loaded. */
+export function stepGroupOf(f: Feature): { name: string; node: string; file: string } | null {
+  if (f.kind !== 'instance') return null;
+  const fragment = String(f.args.path).split('#')[1] ?? '';
+  const node = fragment.slice(0, fragment.lastIndexOf('.'));
+  const root = rootOf(f.name);
+  return node.includes('.') && root?.kind === 'step' && root.file ? { name: node.split('.').pop()!, node, file: root.file } : null;
+}
+
+/** The grey header row above the instances that came out of one node of a STEP file. */
+export function stepGroupMenu(node: string, members: Feature[]): MenuEntry[] {
+  const leaves = members.flatMap((f) => { const r = rootOf(f.name); return r ? leafPaths(r) : []; });
+  const group = members.map(stepGroupOf).find((g) => g && g.node === node) ?? null;
+  return [
+    ...visibilityEntries(leaves),
+    SEP,
+    ...(group ? [item('open sub-assembly', () => void openDocument(`${group.file}#${group.node}`), { title: 'in a tab of its own, in its own coordinates' })] : []),
+  ];
+}
+
+/** The sub-assembly a viewer row can open in a tab: the row itself, or a body's parent.
+ * Never the file's root, which is this document, and only nodes that know their file. */
+export function subAssemblyOf(inst: Instance): Instance | null {
+  const dot = inst.path.lastIndexOf('.');
+  const sub = inst.children.length ? inst : dot > 0 ? instanceByPath(inst.path.slice(0, dot)) : null;
+  return sub && sub.path.includes('.') && sub.file && sub.node ? sub : null;
+}
+
+/** Open a node of a STEP file as a document of its own (the server writes its wrapper). */
+export function openSubAssembly(sub: Instance) {
+  void openDocument(`${sub.file}#${sub.node}`);
 }
 
 /** The viewport: the active tool or pick first, then what is under the cursor, then the view. */

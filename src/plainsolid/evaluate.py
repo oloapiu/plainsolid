@@ -78,6 +78,7 @@ from .stepimport import (
     Instance,
     file_key,
     import_step_tree,
+    relocated,
     select_node,
     single_solid,
     split_fragment,
@@ -527,22 +528,21 @@ def _evaluate_import(feature: Feature, ev: Evaluation, r: FeatureResult) -> None
     try:
         tree = import_step_tree(path)
         if fragment:
-            tree = select_node(tree, fragment)
+            tree = relocated(select_node(tree, fragment))  # one node, in its own coordinates
     except ImportError_ as exc:
         raise ValueError(str(exc)) from None
     tol = feature.args.get("tolerance") or _import_tolerance(tree)
     if ev.document.kind == "assembly":
-        if tree.name != feature.name:
-            tree = _renamed_root(tree, feature.name)
+        tree = _document_tree(tree, feature.name, str(path))
         ev.instances.append(tree)
         ev.import_tolerances[tree.name] = float(tol)
         k = file_key(path)
-        ev.import_keys[tree.name] = f"{k[0]}:{k[1]}:{k[2]}"
+        ev.import_keys[tree.name] = f"{k[0]}:{k[1]}:{k[2]}" + (f"#{fragment}" if fragment else "")
         r.faces_created = sum(len(leaf.shape.faces()) for leaf in tree.leaves() if leaf.shape is not None)
         r.shape = tree
         return
     try:
-        solid = single_solid(tree, local=bool(fragment))  # a node's own geometry, not where the file put it
+        solid = single_solid(tree)
     except ImportError_ as exc:
         raise ValueError(str(exc)) from None
     _merge_body(feature, ev, r, [_as_part(solid)], "add", None)
@@ -864,19 +864,21 @@ def _same_items(a: Projected, b: Projected | None, tol: float = 1e-6) -> bool:
     return True
 
 
-def _renamed_root(tree: Instance, name: str) -> Instance:
-    new = copy.copy(tree)
-    new.name = name
+def _document_tree(tree: Instance, name: str, file: str) -> Instance:
+    """An imported tree as the document shows it: the root named after the feature,
+    every node knowing its file (`node` keeps its path inside the file)."""
     old_prefix = tree.path
-    new.path = name
 
     def fix(inst: Instance) -> Instance:
         c = copy.copy(inst)
+        c.index = None
         c.path = name + c.path[len(old_prefix):]
+        c.file = file
         c.children = [fix(ch) for ch in inst.children]
         return c
 
-    new.children = [fix(ch) for ch in tree.children]
+    new = fix(tree)
+    new.name = name
     return new
 
 

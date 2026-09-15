@@ -26,7 +26,7 @@ from .literals import python_literal
 from .model import Document, source_hash
 from .operations import validate_operation
 from .parse import parse_document
-from .stepimport import ImportError_, import_step_tree, select_node, split_fragment
+from .stepimport import ImportError_, import_step_tree, relocated, select_node, split_fragment
 
 STEP_SUFFIXES = (".step", ".stp")
 CACHE_DIR = ".plainsolid-cache"
@@ -92,32 +92,36 @@ def identifier(text: str, taken: set[str] | None = None) -> str:
     return ident
 
 
-def wrapper_source(step_name: str, kind: str = "assembly") -> str:
-    """The model file that opens a foreign STEP file: a review assembly, or, for a
-    file holding one solid, a part whose body is that solid."""
-    stem = Path(step_name).stem
-    ident = "".join(ch if ch.isalnum() or ch == "_" else "_" for ch in stem)
+def wrapper_source(step_name: str, kind: str = "assembly", node: str | None = None) -> str:
+    """The model file that opens a foreign STEP file, or one node of it: a review
+    assembly, or, for one solid, a part whose body is that solid."""
+    label = node.rsplit(".", 1)[-1] if node else Path(step_name).stem
+    ident = "".join(ch if ch.isalnum() or ch == "_" else "_" for ch in label)
     if not ident or ident[0].isdigit():
         ident = "step_" + ident
     if keyword.iskeyword(ident) or not ident.isidentifier():
         ident = identifier(ident)
+    target = step_name + (f"#{node}" if node else "")
     if kind == "part":
         return (
             "from plainsolid import *\n\n"
-            f'meta(name={python_literal(stem)})\n\n'
-            f'body = import_step("body", {python_literal(step_name)})\n'
+            f'meta(name={python_literal(label)})\n\n'
+            f'body = import_step("body", {python_literal(target)})\n'
         )
     return (
         "from plainsolid import *\n\n"
-        f'meta(kind="assembly", name={python_literal(stem)})\n\n'
-        f'{ident} = import_step({python_literal(ident)}, {python_literal(step_name)})\n'
+        f'meta(kind="assembly", name={python_literal(label)})\n\n'
+        f'{ident} = import_step({python_literal(ident)}, {python_literal(target)})\n'
     )
 
 
-def step_kind(path: Path) -> str:
-    """What a STEP file opens as: a part when it holds exactly one solid, else an assembly."""
+def step_kind(path: Path, node: str | None = None) -> str:
+    """What a STEP file, or one node of it, opens as: a part when it holds exactly
+    one solid, else an assembly."""
     try:
         tree = import_step_tree(path)
+        if node:
+            tree = select_node(tree, node)
     except ImportError_:
         return "assembly"
     solids = sum(len(leaf.shape.solids()) for leaf in tree.leaves() if leaf.shape is not None)
@@ -260,17 +264,19 @@ class Workspace:
     # --- documents ---------------------------------------------------------
 
     def open(self, path: str | Path) -> OpenDocument:
-        p = Path(path)
+        """A model file, a STEP file (through its wrapper), or `x.step#node`: one
+        sub-assembly of the file as a document of its own."""
+        text, node = split_fragment(str(path))
+        p = Path(text)
         if not p.is_absolute():
             p = self.root / p
         p = p.resolve()
         if p.suffix.lower() in STEP_SUFFIXES:
             if not p.exists():
                 raise FileNotFoundError(p)
-            wrapper = p.with_suffix(".py")
-            if not wrapper.exists():
-                wrapper.write_text(wrapper_source(p.name, step_kind(p)), encoding="utf-8")
-            p = wrapper
+            p = self._wrapper(p, node)
+        elif node:
+            raise ValueError(f"only a STEP file takes a #node, not {p.name}")
         for d in self.docs.values():
             if d.path == p:
                 return d
@@ -279,6 +285,25 @@ class Workspace:
                            cache_dir=self.root / CACHE_DIR)
         self.docs[doc.id] = doc
         return doc
+
+    def _wrapper(self, step: Path, node: str | None) -> Path:
+        """The model file that opens a STEP file or one node of it, written on the
+        first open: `x.py` next to `x.step`; `x.sub.part.py` for the node `root.sub.part`,
+        which is shown in its own coordinates. A short fragment is written out in full."""
+        below = ""
+        if node:
+            try:
+                node = select_node(import_step_tree(step), node).path
+            except ImportError_ as exc:
+                raise ValueError(str(exc)) from None
+            below = node.split(".", 1)[1] if "." in node else ""
+            if not below:
+                node = None  # the root is the whole file
+        safe = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in below)
+        wrapper = step.with_name(f"{step.stem}.{safe}.py") if safe else step.with_suffix(".py")
+        if not wrapper.exists():
+            wrapper.write_text(wrapper_source(step.name, step_kind(step, node), node), encoding="utf-8")
+        return wrapper
 
     def create(self, path: str | Path, kind: str = "part", name: str | None = None,
                material: str = "al6061", of: str | None = None) -> OpenDocument:
@@ -468,7 +493,7 @@ class Workspace:
         path = (doc.path.parent / file).resolve()
         try:
             tree = import_step_tree(path)
-            node = select_node(tree, fragment) if fragment else tree
+            node = relocated(select_node(tree, fragment)) if fragment else tree  # posed as the viewer showed them
         except ImportError_ as exc:
             raise edit_ops.EditError(str(exc)) from None
         taken = {f.name for f in parsed.features} | {p.name for p in parsed.params}

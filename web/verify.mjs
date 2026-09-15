@@ -506,6 +506,32 @@ await page.click('[data-testid="instance-node.bracket"]');
 await page.waitForTimeout(200);
 check('instance selection shows product and solids', (await page.locator('[data-testid=instance-props]').textContent())?.includes('bracket') ?? false);
 
+// a sub-assembly of the file opens in a tab of its own through a wrapper named after the node, in its own coordinates
+await page.click('[data-testid="instance-node.glands"]', { button: 'right' });
+await page.waitForSelector('[data-testid=ctx-open-sub-assembly]');
+await page.click('[data-testid=ctx-open-sub-assembly]');
+await page.waitForSelector('[data-testid="doc-tab-glands"]', { timeout: 30000 });
+await page.waitForSelector('[data-testid="instance-glands.gland_2"]', { timeout: 30000 });
+await page.waitForFunction(() => window.__plainsolid.getState().mesh?.header.items?.length === 2, null, { timeout: 20000 });
+const subWrapper = path.join(PROJ, 'vendor', 'node_stub.glands.py');
+check('a sub-assembly of a STEP viewer opens in a tab of its own through a wrapper named after the node',
+  ((await page.locator('.doc-tab.active').textContent()) ?? '').includes('glands') && fs.existsSync(subWrapper)
+    && fs.readFileSync(subWrapper, 'utf8').includes('glands = import_step("glands", "node_stub.step#node.glands")')
+    && (await page.locator('[data-testid^="instance-"]').count()) === 3
+    && (await page.locator('[data-testid=ctx-open-sub-assembly]').count()) === 0,
+  fs.existsSync(subWrapper) ? fs.readFileSync(subWrapper, 'utf8').split('\n').pop() : 'no wrapper');
+await page.click('[data-testid="instance-glands.gland_1"]', { button: 'right' });
+await page.waitForSelector('[data-testid=context-menu]');
+const subRowMenu = await (await state()).contextMenu?.entries.filter((e) => !e.sep).map((e) => e.label);
+await page.keyboard.press('Escape');
+check('inside the sub-assembly its root is this document, so a body offers no parent to open', !(subRowMenu ?? []).some((l) => l.startsWith('open ')), (subRowMenu ?? []).join(' | '));
+await page.click('.doc-tab.active .doc-tab-close');
+await page.waitForTimeout(500);
+await page.click('[data-testid="doc-tab-node_review"]');
+await page.waitForSelector('[data-testid="instance-node.glands.gland_1"]', { timeout: 20000 });
+await page.click('[data-testid="instance-node.bracket"]');
+await page.waitForTimeout(200);
+
 // visibility toggle persists to the sidecar
 await page.locator('[data-testid="vis-node.bracket"]').click();
 await page.waitForTimeout(1200);
@@ -1192,6 +1218,25 @@ check('new assembly creates an assembly file and an instance picked from the pro
     (await page.locator('[data-testid=mode-chip]').textContent()) === 'assembly' && /gland_1 = instance\("gland_1", "vendor\/node_stub.step#node.glands.gland_1", at=\(-15, 20, 0\), rotate=\(90, 0, 0\)\)/.test(exploded)
       && (await page.locator('.tree-group').count()) === 2 && !fs.existsSync(path.join(PROJ, 'gland_1.py')),
     exploded.split('\n').filter((l) => l.includes('instance(')).length + ' instances');
+  // the grey group rows of an editable assembly open their node of the file the same way
+  await page.click('[data-testid="group-node.glands"]', { button: 'right' });
+  await page.waitForSelector('[data-testid=context-menu]');
+  const groupMenu = (await st()).contextMenu?.entries.filter((e) => !e.sep).map((e) => e.label) ?? [];
+  await page.click('[data-testid=ctx-open-sub-assembly]');
+  await page.waitForSelector('[data-testid="doc-tab-glands"]', { timeout: 30000 });
+  await page.waitForSelector('[data-testid="instance-glands.gland_2"]', { timeout: 30000 });
+  check('a group row of an editable assembly offers visibility and opens its sub-assembly in a tab', ['isolate', 'hide', 'transparent', 'open sub-assembly'].every((l) => groupMenu.includes(l))
+    && ((await page.locator('.doc-tab.active').textContent()) ?? '').includes('glands'), groupMenu.join(' | '));
+  await page.click('.doc-tab.active .doc-tab-close');
+  await page.waitForTimeout(500);
+  await page.click('[data-testid="doc-tab-node_review"]');
+  await page.waitForSelector('[data-testid=feature-gland_1]', { timeout: 30000 });
+  await page.click('[data-testid=feature-gland_1]', { button: 'right' });
+  await page.waitForSelector('[data-testid=context-menu]');
+  const bodyMenu = (await st()).contextMenu?.entries.filter((e) => !e.sep).map((e) => e.label) ?? [];
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(200);
+  check('an instance that came out of a sub-assembly offers to open that sub-assembly', bodyMenu.includes('open glands') && !bodyMenu.includes('open node'), bodyMenu.join(' | '));
   await page.click('[data-testid=feature-gland_1]');
   await page.click('[data-testid=edit-part]');
   await page.waitForSelector('[data-testid="doc-tab-gland_1"]', { timeout: 30000 });
