@@ -5,6 +5,7 @@ Every command prints JSON so agents and scripts can consume it.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -22,7 +23,7 @@ from .evaluate import evaluate
 from .parse import parse_file
 from .selectors import SelectorError
 from .stepimport import split_fragment
-from .workspace import StaleHashError, Workspace
+from .workspace import CACHE_DIR, StaleHashError, Workspace
 
 GUIDE = Path(__file__).parent / "agent.md"
 DEFAULT_PROJECT = "cad"
@@ -306,7 +307,8 @@ def docs() -> None:
 @app.command()
 def serve(root: Path | None = typer.Argument(None, help=ROOT_HELP, show_default=False),
           port: int = 8321, host: str = "127.0.0.1",
-          open: list[Path] = typer.Option([], "--open", help="documents to open at start, relative to the project")) -> None:
+          open: list[Path] = typer.Option([], "--open", help="documents to open at start, relative to the project"),
+          idle_exit: float = typer.Option(0, "--idle-exit", help="minutes without a tab or a request after which the server stops; 0 never")) -> None:
     """Start the local API server (and the bundled client, if built) on a project
     directory, created when it does not exist yet. Documents are only ever opened
     and written inside it."""
@@ -314,7 +316,284 @@ def serve(root: Path | None = typer.Argument(None, help=ROOT_HELP, show_default=
 
     directory = _root(root)
     directory.mkdir(parents=True, exist_ok=True)
-    _serve(directory, host=host, port=port, open_paths=[str(p) for p in open])
+    _serve(directory, host=host, port=port, open_paths=[str(p) for p in open], idle_minutes=idle_exit)
+
+
+# --- the running app: open, status, stop, the launcher ---------------------------
+
+DEFAULT_PORT = 8321  # server.DEFAULT_PORT, repeated so these commands do not import the server
+IDLE_MINUTES = 30    # a server that `open` starts stops this long after the last tab and request
+
+
+class ServerError(Exception):
+    pass
+
+
+def _api(port: int, path: str, body: dict[str, Any] | None = None, timeout: float = 3.0) -> Any:
+    """One request to a plainsolid server on this machine; None when nothing answers there."""
+    import urllib.error
+    import urllib.request
+
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(f"http://127.0.0.1:{port}{path}", data=data, method="POST" if body is not None else "GET",
+                                 headers={"content-type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read())
+    except urllib.error.HTTPError as exc:
+        try:
+            detail = json.loads(exc.read())
+        except ValueError:
+            detail = {}
+        raise ServerError(detail.get("error") or detail.get("detail") or str(exc)) from None
+    except (urllib.error.URLError, OSError, ValueError):
+        return None
+
+
+def _health(port: int) -> dict[str, Any] | None:
+    h = _api(port, "/api/health", timeout=2.0)
+    return h if isinstance(h, dict) and h.get("ok") and "root" in h else None
+
+
+def _start_server(directory: Path, port: int) -> dict[str, Any]:
+    """Start `plainsolid serve` on `directory` detached from this terminal, logging to the
+    project's cache folder, and wait until it answers."""
+    import subprocess
+    import sys
+    import time
+
+    log_dir = directory / CACHE_DIR
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / "serve.log"
+    with log_path.open("ab") as log:
+        subprocess.Popen([sys.executable, "-m", "plainsolid.cli", "serve", str(directory), "--port", str(port),
+                          "--idle-exit", str(IDLE_MINUTES)],
+                         stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, start_new_session=True)
+    for _ in range(240):  # the kernel takes a few seconds to import
+        time.sleep(0.5)
+        health = _health(port)
+        if health:
+            return health
+    _fail(f"the server did not come up on port {port}; see {log_path}")
+    raise AssertionError  # unreachable
+
+
+@app.command("open")
+def open_files(files: list[Path] = typer.Argument(..., help="model or STEP files"),
+               port: int = typer.Option(DEFAULT_PORT, help="the server's port"),
+               root: Path | None = typer.Option(None, help=ROOT_HELP + "; only used to start a server when none runs")) -> None:
+    """Open files in the running app, starting the server when none runs. A file inside the
+    project opens as it is; a STEP file from elsewhere goes through the import dialog, which
+    copies it into the project. The browser is raised only when no tab of the app is open."""
+    import urllib.parse
+    import webbrowser
+
+    paths = [f.expanduser().resolve() for f in files]
+    for p in paths:
+        if not p.exists():
+            _fail(f"no such file: {p}")
+    health = _health(port)
+    started = health is None
+    if health is None:
+        directory = _root(root)
+        directory.mkdir(parents=True, exist_ok=True)
+        health = _start_server(directory, port)
+    results: list[dict[str, Any]] = []
+    for p in paths:
+        try:
+            results.append(_api(port, "/api/open-request", {"path": str(p)}))
+        except ServerError as exc:
+            _fail(str(exc))
+    raised = not any(r["delivered"] for r in results)
+    if raised:
+        query = urllib.parse.urlencode([(r["action"], r["path"] if r["action"] == "open" else r["source"]) for r in results])
+        webbrowser.open(f"http://127.0.0.1:{port}/?{query}")
+    _out({"root": health["root"], "port": port, "started": started, "browser": raised,
+          "files": [{k: v for k, v in r.items() if k != "delivered"} for r in results]})
+
+
+@app.command()
+def status(port: int = typer.Option(DEFAULT_PORT, help="the server's port")) -> None:
+    """Whether a server runs on the port, on which project, with which documents open."""
+    health = _health(port)
+    if not health:
+        _out({"running": False, "port": port})
+        return
+    docs = _api(port, "/api/documents") or []
+    _out({"running": True, "port": port, "root": health["root"], "pid": health.get("pid"), "tabs": health.get("tabs"),
+          "idle_minutes": health.get("idle_minutes"), "documents": [d["path"] for d in docs]})
+
+
+@app.command()
+def stop(port: int = typer.Option(DEFAULT_PORT, help="the server's port")) -> None:
+    """Stop the server on the port; every tab of the app loses it."""
+    import signal
+
+    health = _health(port)
+    if not health:
+        _fail(f"no server on port {port}")
+        raise AssertionError  # unreachable
+    r = _api(port, "/api/shutdown", {})
+    stopped = bool(isinstance(r, dict) and r.get("stopping"))
+    if not stopped and health.get("pid"):  # a server run without its handle: ask the process instead
+        os.kill(int(health["pid"]), signal.SIGTERM)
+        stopped = True
+    _out({"stopped": stopped, "root": health["root"], "pid": health.get("pid")})
+
+
+def _launch_command() -> list[str]:
+    """How a launcher runs this tool: the console script that is running, else python -m."""
+    import sys
+
+    exe = Path(sys.argv[0]).resolve() if sys.argv and sys.argv[0] else None
+    if exe is not None and exe.is_file() and os.access(exe, os.X_OK) and exe.suffix != ".py":
+        return [str(exe)]
+    return [sys.executable, "-m", "plainsolid.cli"]
+
+
+def quick_action(command: list[str]) -> tuple[dict[str, Any], dict[str, Any]]:
+    """The two plists of a Finder Quick Action, "Open in plainsolid" in the right-click menu,
+    that runs `command open` on every selected STEP file: document.wflow and Info.plist."""
+    import shlex
+    import uuid
+
+    script = ('for f in "$@"; do\n  case "$f" in\n    *.step|*.stp|*.STEP|*.STP) '
+              + " ".join(shlex.quote(c) for c in command) + ' open "$f" ;;\n  esac\ndone\n')
+    uid = lambda: str(uuid.uuid4()).upper()
+    defaults = [("inputMethod", 0), ("source", ""), ("CheckedForUserDefaultShell", False), ("COMMAND_STRING", ""), ("shell", "/bin/sh")]
+    action = {
+        "AMAccepts": {"Container": "List", "Optional": True, "Types": ["com.apple.cocoa.string"]},
+        "AMActionVersion": "2.0.3",
+        "AMApplication": ["Automator"],
+        "AMParameterProperties": {name: {} for name, _ in defaults},
+        "AMProvides": {"Container": "List", "Types": ["com.apple.cocoa.string"]},
+        "ActionBundlePath": "/System/Library/Automator/Run Shell Script.action",
+        "ActionName": "Run Shell Script",
+        "ActionParameters": {"COMMAND_STRING": script, "CheckedForUserDefaultShell": True, "inputMethod": 1,
+                             "shell": "/bin/zsh", "source": ""},
+        "BundleIdentifier": "com.apple.RunShellScript",
+        "CFBundleVersion": "2.0.3",
+        "CanShowSelectedItemsWhenRun": False,
+        "CanShowWhenRun": True,
+        "Category": ["AMCategoryUtilities"],
+        "Class Name": "RunShellScriptAction",
+        "InputUUID": uid(),
+        "Keywords": ["Shell", "Script", "Command", "Run", "Unix"],
+        "OutputUUID": uid(),
+        "UUID": uid(),
+        "UnlocalizedApplications": ["Automator"],
+        "arguments": {str(i): {"default value": value, "name": name, "required": "0", "type": "0", "uuid": str(i)}
+                      for i, (name, value) in enumerate(defaults)},
+        "isViewVisible": 1,
+        "location": "309.000000:253.000000",
+        "nibPath": "/System/Library/Automator/Run Shell Script.action/Contents/Resources/Base.lproj/main.nib",
+    }
+    workflow = {
+        "AMApplicationBuild": "523", "AMApplicationVersion": "2.10", "AMDocumentVersion": "2",
+        "actions": [{"action": action, "isViewVisible": 1}],
+        "connectors": {},
+        "workflowMetaData": {
+            "applicationBundleIDsByPath": {}, "applicationPaths": [],
+            "inputTypeIdentifier": "com.apple.Automator.fileSystemObject",
+            "outputTypeIdentifier": "com.apple.Automator.nothing",
+            "presentationMode": 11, "processesInput": 0,
+            "serviceApplicationBundleID": "com.apple.finder",
+            "serviceApplicationPath": "/System/Library/CoreServices/Finder.app",
+            "serviceInputTypeIdentifier": "com.apple.Automator.fileSystemObject",
+            "serviceOutputTypeIdentifier": "com.apple.Automator.nothing",
+            "serviceProcessesInput": 0,
+            "systemImageName": "NSActionTemplate",
+            "useAutomaticInputType": 0,
+            "workflowTypeIdentifier": "com.apple.Automator.servicesMenu",
+        },
+    }
+    info = {"NSServices": [{
+        "NSBackgroundColorName": "background",
+        "NSIconName": "NSActionTemplate",
+        "NSMenuItem": {"default": "Open in plainsolid"},
+        "NSMessage": "runWorkflowAsService",
+        "NSRequiredContext": {"NSApplicationIdentifier": "com.apple.finder"},
+        "NSSendFileTypes": ["public.item"],
+    }]}
+    return workflow, info
+
+
+def _install_quick_action(command: list[str]) -> list[Path]:
+    import plistlib
+    import subprocess
+
+    bundle = Path.home() / "Library" / "Services" / "Open in plainsolid.workflow"
+    (bundle / "Contents").mkdir(parents=True, exist_ok=True)
+    workflow, info = quick_action(command)
+    with (bundle / "Contents" / "document.wflow").open("wb") as f:
+        plistlib.dump(workflow, f)
+    with (bundle / "Contents" / "Info.plist").open("wb") as f:
+        plistlib.dump(info, f)
+    # the Finder lists a new Quick Action only once it is ticked under its "Customize…" entry;
+    # this is the record that tick writes, so the menu shows the action right away
+    subprocess.run(["defaults", "write", "pbs", "NSServicesStatus", "-dict-add",
+                    "(null) - Open in plainsolid - runWorkflowAsService",
+                    "{ presentation_modes = { ContextMenu = 1; FinderPreview = 1; ServicesMenu = 1; TouchBar = 0; }; }"],
+                   check=False, capture_output=True)
+    pbs = Path("/System/Library/CoreServices/pbs")
+    if pbs.exists():  # tell the Finder now rather than at the next login
+        subprocess.run([str(pbs), "-update"], check=False, capture_output=True)
+    return [bundle]
+
+
+def desktop_entry(command: list[str]) -> tuple[str, str]:
+    """A freedesktop launcher registering plainsolid for STEP files ("Open with" in the file
+    manager) and the MIME package that names them: plainsolid.desktop and plainsolid.xml."""
+    exe = " ".join(f'"{c}"' if " " in c else c for c in command)
+    desktop = ("[Desktop Entry]\nType=Application\nName=plainsolid\nComment=Open a STEP file in plainsolid\n"
+               f"Exec={exe} open %F\nTerminal=false\nMimeType=model/step;application/step;application/x-step;\n"
+               "Categories=Graphics;Engineering;\n")
+    mime = ('<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">\n'
+            '  <mime-type type="model/step">\n    <comment>STEP CAD model</comment>\n'
+            + "".join(f'    <glob pattern="*.{ext}"/>\n' for ext in ("step", "stp", "STEP", "STP"))
+            + "  </mime-type>\n</mime-info>\n")
+    return desktop, mime
+
+
+def _install_desktop_entry(command: list[str]) -> list[Path]:
+    import shutil
+    import subprocess
+
+    apps = Path.home() / ".local" / "share" / "applications"
+    mime = Path.home() / ".local" / "share" / "mime"
+    apps.mkdir(parents=True, exist_ok=True)
+    (mime / "packages").mkdir(parents=True, exist_ok=True)
+    desktop, package = desktop_entry(command)
+    (apps / "plainsolid.desktop").write_text(desktop, encoding="utf-8")
+    (mime / "packages" / "plainsolid.xml").write_text(package, encoding="utf-8")
+    for cmd in (["update-mime-database", str(mime)], ["update-desktop-database", str(apps)],
+                ["xdg-mime", "default", "plainsolid.desktop", "model/step"]):
+        if shutil.which(cmd[0]):
+            subprocess.run(cmd, check=False, capture_output=True)
+    return [apps / "plainsolid.desktop", mime / "packages" / "plainsolid.xml"]
+
+
+@app.command("install-launcher")
+def install_launcher() -> None:
+    """Let the file manager open STEP files with plainsolid: on macOS "Open in plainsolid"
+    among the Finder's Quick Actions (right-click), on Linux a desktop entry registered
+    for STEP files. Both call this very executable by its full path, so nothing else needs
+    setting up; delete the written files to undo."""
+    import sys
+
+    command = _launch_command()
+    if sys.platform == "darwin":
+        written = _install_quick_action(command)
+        note = ("in the Finder, right-click a STEP file, Quick Actions, Open in plainsolid; should the submenu "
+                "show only Customize…, pick it and tick Open in plainsolid")
+    elif sys.platform.startswith("linux"):
+        written = _install_desktop_entry(command)
+        note = "in the file manager, right-click a STEP file, Open with, plainsolid"
+    else:
+        _fail(f"no launcher for {sys.platform}")
+        raise AssertionError  # unreachable
+    _out({"command": command, "written": [str(p) for p in written], "note": note})
 
 
 def main() -> None:

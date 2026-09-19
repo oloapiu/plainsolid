@@ -27,6 +27,7 @@ plainsolid compare FILE [OTHER | --rev HEAD~1] [-o overlay.png]
 plainsolid export FILE -o out.step|out.stl   a drawing: out.svg|out.dxf|out.pdf
 plainsolid docs                          this guide
 plainsolid mcp [DIR]                     the same as MCP tools on stdio; DIR: cad/ in the checkout by default
+plainsolid open FILE... | status | stop | install-launcher   the running app, for people (see the README)
 ```
 
 Every command prints JSON. Exit codes: 0 ok, 1 an error (`{"error": ...}` on

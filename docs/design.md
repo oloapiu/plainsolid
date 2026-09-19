@@ -156,6 +156,8 @@ Views and manual dimensions, not full drafting.
 | View state | Camera, named views, section, per-instance visibility and transparency live in a sidecar JSON next to each document. Git-tracked, ignored if missing or malformed, never referenced by the model file. |
 | Mesh cache | Product tessellations are kept in memory and on disk (`.plainsolid-cache/`, gitignored), keyed by file, node and tolerance, never by pose. Derived state only. |
 | Layout | The project is one directory: `cad/` in the checkout by default (gitignored), or the one given to `serve`. Documents are only ever opened and written inside it. Flat, with `vendor/` for bought STEP files and `proposals/` for the manufacturer's. |
+| Files from outside | A STEP file from elsewhere is copied into the project, never opened in place: one dialog for folder and name, reached by dropping the file on the window, by `plainsolid open FILE`, or by the launcher `install-launcher` writes (a Finder Quick Action on macOS, a desktop entry on Linux), which calls the executable by its full path so nothing else needs setting up. |
+| Lifetime | `open` hands files to the open tabs through a workspace socket and raises a browser only when none is open; it starts a server when none answers, detached, with an idle exit thirty minutes after the last tab and request. `stop`, `status` and "quit server" in the file menu talk to the same server. |
 | Export | STEP for parts and posed assemblies with names and colours, STL; drawings to SVG, DXF and PDF. |
 
 ### Tooling
@@ -313,12 +315,16 @@ All under `/api`. Responses are JSON unless noted; errors are `{error}` with
 or an existing file, 422 for a malformed request.
 
 ```
-GET    /health
+GET    /health                                 root, pid, port, tabs, idle minutes
+POST   /shutdown                               stop the server
 GET    /documents                              open documents with their kind
 GET    /files                                  model and STEP files under the project
 POST   /documents/open       {path}            a .py, a .step which gets a wrapper, or .step#node for one sub-assembly of it
 POST   /documents/{id}/close
 POST   /documents/new        {path, kind, name, material, of}
+POST   /documents/import     {source, folder, name}   copy a STEP file from this machine into the project and open it
+PUT    /documents/upload?folder&name&suffix    the same from the bytes of a dropped file
+POST   /open-request         {path}            tell the open tabs to open a project file or to import a STEP file; how many heard
 GET    /documents/{id}/tree                    features with results, constraints, planes, dependants,
                                                names for expressions, the geometry revision; a drawing's
                                                evaluation carries the whole sheet as a 2D scene
@@ -341,6 +347,7 @@ POST   /documents/{id}/compare {other, rev, upto}   volumes and regions added an
 POST   /documents/{id}/export {format, path}   step, stl; a drawing: svg, dxf, pdf
 GET    /documents/{id}/views | PUT {views}     the sidecar view state
 WS     /documents/{id}/events                  hello, changed, external, dependency
+WS     /events                                 one per tab: hello, open-request
 ```
 
 The mesh is one binary buffer: a uint32 header length, a JSON header padded
@@ -371,7 +378,10 @@ browser's types.
 ### The CLI
 
 ```
-plainsolid serve [dir] --open FILE --port N   dir: cad/ in the checkout by default; created if missing
+plainsolid serve [dir] --open FILE --port N --idle-exit MIN   dir: cad/ in the checkout by default; created if missing
+plainsolid open FILE...                  in the running app, or a new server; a STEP file from outside goes through the import dialog
+plainsolid status | stop                 the server on the port
+plainsolid install-launcher              "Open in plainsolid" in the Finder, or a desktop entry on Linux
 plainsolid new FILE [--kind assembly | --kind drawing --of MODEL] [--name N] [--material M]
 plainsolid tree FILE                     also accepts a .step file
 plainsolid query FILE KIND [--upto F]

@@ -17,6 +17,7 @@ import type {
   Summary,
   Tree,
   ViewSnapshot,
+  ImportItem,
 } from '../api/types';
 import type { DimensionPlan } from '../sketch/model';
 
@@ -125,6 +126,7 @@ export interface State {
   queries: AssemblyQueries | null;  // bill of materials and interference of the current assembly
   files: ProjectFile[];             // model and STEP files under the project, for choosers
   filesRoot: string;                // the project directory those paths are relative to
+  imports: ImportItem[];            // STEP files waiting for the import dialog; the first one shows
   moveMode: MoveMode;               // the move tool: slide or turn the dragged instance
   posePreview: PosePreview | null;  // assemblies: instances drawn at previewed poses (a drag, a mate being added)
   previewNote: string | null;       // what the preview says: constrained, free, or conflicting
@@ -149,7 +151,7 @@ const initial: State = {
   sectionInstalls: 0, overlay: null, visibility: {}, transparency: {},
   measure: { picks: [], result: null, pending: false }, pins: [], named: {}, camera: null, cameraToApply: null, fitPending: false,
   viewsWarning: null, showPlanes: false, ortho: false, orthoBeforeSketch: null, ghostMesh: null, ghostStyle: 'ghost',
-  planeDialog: null, featureDialog: null, dialogPicks: [], pickRequest: null, queries: null, files: [], filesRoot: '',
+  planeDialog: null, featureDialog: null, dialogPicks: [], pickRequest: null, queries: null, files: [], filesRoot: '', imports: [],
   moveMode: 'translate', posePreview: null, previewNote: null, drawingTool: null, drawingPicks: [], dimKind: 'auto', busy: 0, deleteConfirm: null, treeHover: null, summary: null, refHighlight: [], contextMenu: null, codeReveal: 0, version: 0,
 };
 

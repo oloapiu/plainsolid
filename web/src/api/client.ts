@@ -1,4 +1,4 @@
-import type { DocSummary, DragResult, EditOp, EditResult, MeasureRef, MeasureResult, Overlay, PreviewResult, ProjectFile, SectionSpec, SketchSolution, Tree, ViewsState, WsEvent } from './types';
+import type { DocSummary, DragResult, EditOp, EditResult, MeasureRef, MeasureResult, Overlay, PreviewResult, ProjectFile, SectionSpec, SketchSolution, Tree, ViewsState, WorkspaceEvent, WsEvent } from './types';
 import { parseMesh, type ParsedMesh } from './mesh';
 
 export class ApiError extends Error {
@@ -37,6 +37,24 @@ function meshQuery(o: MeshOptions): string {
   else if (o.overlay?.other) q.set('overlay', o.overlay.other);
   const s = q.toString();
   return s ? `?${s}` : '';
+}
+
+/** A server socket that reconnects with backoff until unsubscribed. */
+function subscribe<T>(path: string, onEvent: (e: T) => void): () => void {
+  let ws: WebSocket | null = null;
+  let closed = false;
+  let retry = 500;
+  const connect = () => {
+    if (closed) return;
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    ws = new WebSocket(`${proto}://${location.host}${path}`);
+    ws.onmessage = (m) => { try { onEvent(JSON.parse(m.data) as T); } catch { /* ignore */ } };
+    ws.onopen = () => { retry = 500; };
+    ws.onclose = () => { if (!closed) { setTimeout(connect, retry); retry = Math.min(retry * 2, 5000); } };
+    ws.onerror = () => ws?.close();
+  };
+  connect();
+  return () => { closed = true; ws?.close(); };
 }
 
 export const api = {
@@ -86,20 +104,10 @@ export const api = {
           body: JSON.stringify({ sketch, drag: drag ?? undefined }), signal }).then(json<SketchSolution>),
   getViews: (id: string) => fetch(`/api/documents/${id}/views`).then(json<ViewsState>),
   putViews: (id: string, views: Partial<ViewsState>) => put(`/api/documents/${id}/views`, { views }).then(json<ViewsState>),
-  events: (id: string, onEvent: (e: WsEvent) => void): (() => void) => {
-    let ws: WebSocket | null = null;
-    let closed = false;
-    let retry = 500;
-    const connect = () => {
-      if (closed) return;
-      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-      ws = new WebSocket(`${proto}://${location.host}/api/documents/${id}/events`);
-      ws.onmessage = (m) => { try { onEvent(JSON.parse(m.data) as WsEvent); } catch { /* ignore */ } };
-      ws.onopen = () => { retry = 500; };
-      ws.onclose = () => { if (!closed) { setTimeout(connect, retry); retry = Math.min(retry * 2, 5000); } };
-      ws.onerror = () => ws?.close();
-    };
-    connect();
-    return () => { closed = true; ws?.close(); };
-  },
+  events: (id: string, onEvent: (e: WsEvent) => void) => subscribe<WsEvent>(`/api/documents/${id}/events`, onEvent),
+  workspaceEvents: (onEvent: (e: WorkspaceEvent) => void) => subscribe<WorkspaceEvent>('/api/events', onEvent),
+  importFile: (source: string, folder: string, name: string) => post('/api/documents/import', { source, folder, name }).then(json<Tree>),
+  uploadFile: (file: Blob, folder: string, name: string, suffix: string) =>
+    fetch(`/api/documents/upload?${new URLSearchParams({ folder, name, suffix })}`, { method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: file }).then(json<Tree>),
+  shutdown: () => post('/api/shutdown', {}).then(json<{ stopping: boolean }>),
 };

@@ -101,6 +101,15 @@ export interface EditResult {
 
 export type WsEvent = { event: 'hello' | 'changed' | 'external' | 'dependency'; doc: string; hash: string; revision: string };
 
+/** The workspace socket, one per tab: what `plainsolid open` and the launchers ask for. */
+export type WorkspaceEvent =
+  | { event: 'hello'; root: string }
+  | { event: 'open-request'; action: 'open'; path: string }
+  | { event: 'open-request'; action: 'import'; source: string; name: string; suffix: string };
+
+/** A STEP file waiting for the import dialog: dropped on the window (file) or named by a launcher (source). */
+export interface ImportItem { name: string; suffix: string; source?: string; file?: Blob }
+
 // ---- sections, measurements, views ---------------------------------------------
 
 export type SectionPlane = 'XY' | 'XZ' | 'YZ';

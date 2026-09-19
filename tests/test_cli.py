@@ -161,3 +161,94 @@ def test_serve_and_mcp_default_to_the_checkouts_cad_folder(tmp_path, monkeypatch
     monkeypatch.setattr(plainsolid.cli, "_checkout", lambda: None)
     result = runner.invoke(app, ["serve"])
     assert result.exit_code == 1 and "pass one" in result.output
+
+
+@pytest.fixture
+def live_server(project):
+    """The real server on a free port in a thread, for the commands that talk to one."""
+    import socket
+    import threading
+    import time
+
+    import uvicorn
+
+    from plainsolid.server import create_app
+
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    app = create_app(project, serve_client=False)
+    app.state.port = port
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
+    app.state.server = server
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    for _ in range(200):
+        if server.started:
+            break
+        time.sleep(0.05)
+    yield port, project, thread
+    server.should_exit = True
+    thread.join(5)
+
+
+def test_open_status_and_stop_talk_to_the_running_server(live_server, tmp_path_factory, monkeypatch):
+    """status reports the project; open classifies each file and, with no tab connected, raises
+    the browser on a URL carrying them; stop makes the server exit."""
+    import shutil
+    import urllib.parse
+    import webbrowser
+
+    port, project, thread = live_server
+    code, out = run("status", "--port", port)
+    st = json.loads(out)
+    assert code == 0 and st["running"] and st["root"] == str(project) and st["documents"] == [] and st["tabs"] == 0
+    elsewhere = tmp_path_factory.mktemp("downloads")
+    src = elsewhere / "node_v4.step"
+    shutil.copy(project / "vendor" / "node_stub.step", src)
+    urls = []
+    monkeypatch.setattr(webbrowser, "open", lambda url: urls.append(url))
+    code, out = run("open", project / "lid.py", src, "--port", port)
+    r = json.loads(out)
+    assert code == 0 and not r["started"] and r["browser"]
+    assert [(f["action"], f.get("path") or f["source"]) for f in r["files"]] == [("open", "lid.py"), ("import", str(src))]
+    assert urls == [f"http://127.0.0.1:{port}/?" + urllib.parse.urlencode([("open", "lid.py"), ("import", str(src))])]
+    assert not (project / "node_v4.step").exists()  # the copy is the dialog's decision, not open's
+    code, out = run("open", elsewhere / "missing.step", "--port", port)
+    assert code == 1
+    code, out = run("stop", "--port", port)
+    assert code == 0 and json.loads(out)["stopped"]
+    thread.join(5)
+    assert not thread.is_alive()
+    code, out = run("status", "--port", port)
+    assert json.loads(out) == {"running": False, "port": port}
+    code, _ = run("stop", "--port", port)
+    assert code == 1
+
+
+def test_launcher_files(monkeypatch, tmp_path):
+    """The Finder Quick Action and the desktop entry call the running executable by its full
+    path and only touch STEP files."""
+    import plistlib
+
+    from plainsolid import cli
+    from plainsolid.server import DEFAULT_PORT
+
+    assert cli.DEFAULT_PORT == DEFAULT_PORT
+    workflow, info = cli.quick_action(["/Applications/My Tools/plainsolid"])
+    for plist in (workflow, info):
+        assert plistlib.loads(plistlib.dumps(plist)) == plist
+    script = workflow["actions"][0]["action"]["ActionParameters"]["COMMAND_STRING"]
+    assert "*.step|*.stp|*.STEP|*.STP) '/Applications/My Tools/plainsolid' open \"$f\"" in script
+    assert workflow["workflowMetaData"]["serviceApplicationBundleID"] == "com.apple.finder"
+    assert info["NSServices"][0]["NSMenuItem"]["default"] == "Open in plainsolid"
+    desktop, mime = cli.desktop_entry(["/opt/plainsolid/.venv/bin/plainsolid"])
+    assert "Exec=/opt/plainsolid/.venv/bin/plainsolid open %F" in desktop and "MimeType=model/step;" in desktop
+    assert '<glob pattern="*.stp"/>' in mime
+    exe = tmp_path / "plainsolid"
+    exe.write_text("#!/bin/sh\n")
+    exe.chmod(0o755)
+    monkeypatch.setattr("sys.argv", [str(exe), "install-launcher"])
+    assert cli._launch_command() == [str(exe)]
+    monkeypatch.setattr("sys.argv", ["/x/cli.py"])
+    assert cli._launch_command()[1:] == ["-m", "plainsolid.cli"]

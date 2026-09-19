@@ -2,7 +2,7 @@
 // then parts, assemblies, drawings and STEP files) with a filter, and a popover that creates a
 // part, an assembly or a drawing from a name and, for a drawing, the model it shows.
 import { useEffect, useRef, useState } from 'react';
-import { useStore, openDocument, newDocument, refreshFiles, setOverlay, getState } from './state/store';
+import { useStore, openDocument, newDocument, refreshFiles, setOverlay, getState, importNext, skipImport } from './state/store';
 import type { ProjectFile } from './api/types';
 
 const RECENT_KEY = 'plainsolid.recent';
@@ -73,7 +73,7 @@ export function OpenMenu({ compare, onCompareDone, openSignal }: { compare: bool
             return list.length ? <div key={kind}><div className="files-group">{label}</div>{list.map((f) => row(f, f.path))}</div> : null;
           })}
           {!visible.length && <div className="panel-help">{q ? 'no file matches · enter opens the typed path if it exists' : 'no documents in the project yet'}</div>}
-          {mode === 'open' && <div className="panel-help">a STEP file opens as a viewer</div>}
+          {mode === 'open' && <div className="panel-help">a STEP file opens as a viewer · drop one from outside the project on the window to copy it in</div>}
         </div>
       )}
     </span>
@@ -145,5 +145,62 @@ export function NewMenu() {
         </div>
       )}
     </span>
+  );
+}
+
+const FOLDER_KEY = 'plainsolid.importFolder';
+/** Where a STEP file from outside goes: proposals/ next to the current document, that folder itself
+ * when the document already sits in proposals/ or vendor/, else the last folder used, else proposals/. */
+function defaultImportFolder(): string {
+  const cur = currentRel();
+  if (cur) {
+    const dir = cur.includes('/') ? cur.slice(0, cur.lastIndexOf('/')) : '';
+    const leaf = dir.split('/').pop() ?? '';
+    if (leaf === 'proposals' || leaf === 'vendor') return dir;
+    return dir ? `${dir}/proposals` : 'proposals';
+  }
+  try { return localStorage.getItem(FOLDER_KEY) ?? 'proposals'; } catch { return 'proposals'; }
+}
+
+/** One STEP file from outside the project at a time: the folder and name it gets inside, then a
+ * copy is made and opened. The original stays where it was. */
+export function ImportDialog() {
+  const imports = useStore((s) => s.imports);
+  const files = useStore((s) => s.files);
+  const item = imports[0];
+  const [folder, setFolder] = useState('');
+  const [name, setName] = useState('');
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (!item) return;
+    setName(item.name);
+    setFolder(defaultImportFolder());
+    setBusy(false);
+  }, [item]);
+  if (!item) return null;
+  const folders = [...new Set([...files.map((f) => (f.path.includes('/') ? f.path.slice(0, f.path.lastIndexOf('/')) : '')), 'proposals', 'vendor'])].filter(Boolean).sort();
+  const dir = folder.trim().replace(/^\/+|\/+$/g, '');
+  const target = `${dir ? `${dir}/` : ''}${name.trim()}${item.suffix}`;
+  const taken = files.some((f) => f.path === target);
+  const submit = async () => {
+    if (!name.trim() || taken || busy) return;
+    setBusy(true);
+    if (await importNext(dir, name.trim())) { try { localStorage.setItem(FOLDER_KEY, dir); } catch { /* fine */ } }
+    else setBusy(false);
+  };
+  return (
+    <div className="import-pop" data-testid="import-pop" role="dialog" onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); skipImport(); } }}>
+      <div className="files-title">import {item.name}{item.suffix}{imports.length > 1 ? ` · ${imports.length - 1} more waiting` : ''}</div>
+      <form onSubmit={(e) => { e.preventDefault(); void submit(); }}>
+        <label className="files-field"><span>folder</span><input list="import-folders" value={folder} onChange={(e) => setFolder(e.target.value)} spellCheck={false} data-testid="import-folder" /></label>
+        <datalist id="import-folders">{folders.map((f) => <option key={f} value={f} />)}</datalist>
+        <label className="files-field"><span>name</span><input autoFocus value={name} onChange={(e) => setName(e.target.value)} spellCheck={false} data-testid="import-name" /></label>
+        <div className="panel-help">copied to {target} and opened{taken ? ' · that file exists already' : ''}; the original stays where it is</div>
+        <div className="btn-row">
+          <button className="btn-small" type="submit" disabled={!name.trim() || taken || busy} data-testid="import-go">{busy ? 'importing…' : 'import'}</button>
+          <button className="btn-small" type="button" onClick={skipImport} data-testid="import-skip">{imports.length > 1 ? 'skip' : 'cancel'}</button>
+        </div>
+      </form>
+    </div>
   );
 }

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import os
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -37,6 +39,16 @@ _render_lock = threading.Lock()
 
 class OpenRequest(BaseModel):
     path: str
+
+
+class LocalFileRequest(BaseModel):
+    path: str  # an absolute path on this machine, from `plainsolid open` or a launcher
+
+
+class ImportRequest(BaseModel):
+    source: str  # an absolute path to a STEP file, copied into the project
+    folder: str = ""
+    name: str | None = None
 
 
 class NewRequest(BaseModel):
@@ -125,16 +137,22 @@ def create_app(root: str | Path | None = None, serve_client: bool = True) -> Fas
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.loop = asyncio.get_running_loop()
-        task = asyncio.create_task(_watch(app, ws))
+        tasks = [asyncio.create_task(_watch(app, ws)), asyncio.create_task(_idle(app))]
         try:
             yield
         finally:
-            task.cancel()
+            for task in tasks:
+                task.cancel()
 
     app = FastAPI(title="plainsolid", version="0.0.1", lifespan=lifespan)
     app.state.workspace = ws
     app.state.subscribers: dict[str, set[asyncio.Queue]] = {}
+    app.state.watchers: set[asyncio.Queue] = set()  # one per open tab: the workspace socket
     app.state.loop = None
+    app.state.server = None          # the uvicorn server, when serve() runs one: shutdown and idle exit
+    app.state.port = None
+    app.state.idle_minutes = 0.0     # stop after this long with no tab and no request; 0 never
+    app.state.last_activity = time.monotonic()
     # OCCT is not safe to use from two threads on shapes that documents share through the part
     # cache, so every kernel operation (evaluating, meshing, previewing, solving, exporting) runs
     # on this one worker; requests queue behind it in arrival order and the event loop stays free
@@ -157,6 +175,11 @@ def create_app(root: str | Path | None = None, serve_client: bool = True) -> Fas
             loop.call_soon_threadsafe(q.put_nowait, payload)
 
     ws.listeners.append(_listener)
+
+    @app.middleware("http")
+    async def _activity(request: Request, call_next):
+        app.state.last_activity = time.monotonic()
+        return await call_next(request)
 
     @app.exception_handler(RequestValidationError)
     async def _request_error(_: Request, exc: RequestValidationError):
@@ -208,7 +231,17 @@ def create_app(root: str | Path | None = None, serve_client: bool = True) -> Fas
 
     @app.get("/api/health")
     def health() -> dict[str, Any]:
-        return {"ok": True, "root": str(ws.root), "documents": len(ws.docs)}
+        return {"ok": True, "root": str(ws.root), "documents": len(ws.docs), "pid": os.getpid(),
+                "port": app.state.port, "tabs": len(app.state.watchers), "idle_minutes": app.state.idle_minutes}
+
+    @app.post("/api/shutdown")
+    def shutdown() -> dict[str, Any]:
+        """Stop the server: `plainsolid stop` and the file menu's "quit server"."""
+        server = app.state.server
+        if server is None:
+            return {"stopping": False, "root": str(ws.root)}
+        server.should_exit = True
+        return {"stopping": True, "root": str(ws.root)}
 
     @app.get("/api/documents")
     def list_documents() -> list[dict[str, Any]]:
@@ -236,6 +269,47 @@ def create_app(root: str | Path | None = None, serve_client: bool = True) -> Fas
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from None
         return await run(doc.tree_json)
+
+    def _imported(fn) -> OpenDocument:
+        try:
+            return fn()
+        except FileExistsError as exc:
+            raise HTTPException(409, f"already exists: {exc}") from None
+        except FileNotFoundError as exc:
+            raise HTTPException(404, f"no such file: {exc}") from None
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from None
+
+    @app.post("/api/documents/import")
+    async def import_document(req: ImportRequest) -> dict[str, Any]:
+        """Copy a STEP file from elsewhere on this machine into the project and open it."""
+        src = Path(req.source).expanduser()
+        doc = await asyncio.to_thread(_imported, functools.partial(
+            ws.import_file, req.folder, req.name or src.stem, src.suffix, source=src))
+        return await run(doc.tree_json)
+
+    @app.put("/api/documents/upload")
+    async def upload_document(request: Request, folder: str = "", name: str = "", suffix: str = "") -> dict[str, Any]:
+        """The same from the browser: the bytes of a dropped STEP file."""
+        data = await request.body()
+        doc = await asyncio.to_thread(_imported, functools.partial(ws.import_file, folder, name, suffix, data=data))
+        return await run(doc.tree_json)
+
+    @app.post("/api/open-request")
+    async def open_request(req: LocalFileRequest) -> dict[str, Any]:
+        """`plainsolid open FILE`: tell every open tab to open a project file, or to offer the
+        import of a STEP file from elsewhere; `delivered` says how many tabs heard it, so the
+        caller raises a browser only when none did."""
+        try:
+            how = ws.locate(req.path)
+        except FileNotFoundError as exc:
+            raise HTTPException(404, f"no such file: {exc}") from None
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from None
+        payload = {"event": "open-request", **how}
+        for q in list(app.state.watchers):
+            q.put_nowait(payload)
+        return {**how, "delivered": len(app.state.watchers)}
 
     @app.post("/api/documents/new")
     async def new_document(req: NewRequest) -> dict[str, Any]:
@@ -456,6 +530,21 @@ def create_app(root: str | Path | None = None, serve_client: bool = True) -> Fas
         finally:
             app.state.subscribers.get(doc_id, set()).discard(q)
 
+    @app.websocket("/api/events")
+    async def workspace_events(websocket: WebSocket) -> None:
+        """One per tab: what `plainsolid open` asks for, and the tab count the idle exit watches."""
+        await websocket.accept()
+        q: asyncio.Queue = asyncio.Queue()
+        app.state.watchers.add(q)
+        try:
+            await websocket.send_json({"event": "hello", "root": str(ws.root)})
+            await _pump(websocket, q)
+        except WebSocketDisconnect:
+            pass
+        finally:
+            app.state.watchers.discard(q)
+            app.state.last_activity = time.monotonic()
+
     # --- client ----------------------------------------------------------
 
     dist = Path(__file__).parent / "static"
@@ -463,6 +552,39 @@ def create_app(root: str | Path | None = None, serve_client: bool = True) -> Fas
         app.mount("/", StaticFiles(directory=dist, html=True), name="client")
 
     return app
+
+
+async def _pump(websocket: WebSocket, q: asyncio.Queue) -> None:
+    """Send queued payloads until the client goes away, noticing the disconnect at once
+    rather than at the next send."""
+    recv = asyncio.ensure_future(websocket.receive())
+    try:
+        while True:
+            get = asyncio.ensure_future(q.get())
+            done, _ = await asyncio.wait({recv, get}, return_when=asyncio.FIRST_COMPLETED)
+            if recv in done:
+                get.cancel()
+                if recv.result().get("type") == "websocket.disconnect":
+                    return
+                recv = asyncio.ensure_future(websocket.receive())
+                continue
+            await websocket.send_json(get.result())
+    finally:
+        recv.cancel()
+
+
+async def _idle(app: FastAPI) -> None:
+    """Stop a server nobody uses: no tab connected and no request for idle_minutes. Off
+    unless serve() was given a limit, which `plainsolid open` does for the servers it starts."""
+    try:
+        while True:
+            await asyncio.sleep(15)
+            server, minutes = app.state.server, app.state.idle_minutes
+            if server is not None and minutes > 0 and not app.state.watchers \
+                    and time.monotonic() - app.state.last_activity > minutes * 60:
+                server.should_exit = True
+    except asyncio.CancelledError:
+        return
 
 
 async def _watch(app: FastAPI, ws: Workspace) -> None:
@@ -484,10 +606,14 @@ async def _watch(app: FastAPI, ws: Workspace) -> None:
 
 
 def serve(root: str | Path | None = None, host: str = "127.0.0.1", port: int = DEFAULT_PORT,
-          open_paths: list[str] | None = None) -> None:
+          open_paths: list[str] | None = None, idle_minutes: float = 0.0) -> None:
     import uvicorn
 
     app = create_app(root)
+    app.state.port = port
+    app.state.idle_minutes = idle_minutes
     for p in open_paths or []:
         app.state.workspace.open(p)
-    uvicorn.run(app, host=host, port=port, log_level="info")
+    server = uvicorn.Server(uvicorn.Config(app, host=host, port=port, log_level="info"))
+    app.state.server = server  # so /api/shutdown and the idle exit can stop it
+    server.run()

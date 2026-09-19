@@ -265,3 +265,64 @@ def test_open_a_sub_assembly_of_a_step_file(client):
     assert [d["name"] for d in docs] == ["glands"] and docs[0]["path"].endswith("vendor/node_stub.glands.py")
     r = client.post("/api/documents/open", json={"path": "vendor/node_stub.step#lid"})
     assert r.status_code == 400 and "no node 'lid'" in r.text
+
+
+def test_import_copies_a_step_file_into_the_project(client, project, tmp_path_factory):
+    """A STEP file from elsewhere is copied in as folder/name.suffix and opened; the original
+    stays; nothing lands outside the project; the upload route takes the bytes instead."""
+    import shutil
+
+    elsewhere = tmp_path_factory.mktemp("downloads")
+    src = elsewhere / "0_node-s_2_asm.stp"
+    shutil.copy(project / "vendor" / "node_stub.step", src)
+    assert client.post("/api/open-request", json={"path": str(src)}).json() == {
+        "action": "import", "source": str(src), "name": "0_node-s_2_asm", "suffix": ".stp", "delivered": 0}
+    assert client.post("/api/open-request", json={"path": str(project / "bracket.py")}).json() == {
+        "action": "open", "path": "bracket.py", "delivered": 0}
+    assert client.post("/api/open-request", json={"path": str(elsewhere / "notes.txt")}).status_code == 404
+    (elsewhere / "notes.txt").write_text("x")
+    assert client.post("/api/open-request", json={"path": str(elsewhere / "notes.txt")}).status_code == 400
+
+    tree = client.post("/api/documents/import", json={"source": str(src), "folder": "proposals", "name": "node v4"}).json()
+    assert tree["kind"] == "assembly" and tree["path"] == str(project / "proposals" / "node_v4.py")
+    assert (project / "proposals" / "node_v4.stp").read_bytes() == src.read_bytes() and src.exists()
+    assert client.post("/api/documents/import", json={"source": str(src), "folder": "proposals", "name": "node_v4"}).status_code == 409
+    assert client.post("/api/documents/import", json={"source": str(src), "folder": "../out", "name": "x"}).status_code == 400
+    assert not (project.parent / "out").exists()
+    assert client.post("/api/documents/import", json={"source": str(elsewhere / "notes.txt"), "name": "x"}).status_code == 400
+    assert client.post("/api/documents/import", json={"source": str(elsewhere / "gone.step"), "name": "x"}).status_code == 404
+
+    r = client.put("/api/documents/upload?folder=vendor&name=stub%20copy&suffix=.step", content=src.read_bytes())
+    assert r.status_code == 200 and (project / "vendor" / "stub_copy.step").exists()
+    files = client.get("/api/files").json()["files"]
+    assert {"path": "proposals/node_v4.stp", "kind": "step", "wrapper": "proposals/node_v4.py"} in files
+
+
+def test_open_request_reaches_a_connected_tab(client, project):
+    """A tab holds the workspace socket: it hears what `plainsolid open` asks for, and the
+    health endpoint counts it for the idle exit."""
+    import time
+
+    with client.websocket_connect("/api/events") as tab:
+        assert tab.receive_json() == {"event": "hello", "root": str(project)}
+        assert client.get("/api/health").json()["tabs"] == 1
+        r = client.post("/api/open-request", json={"path": str(project / "lid.py")}).json()
+        assert r["delivered"] == 1
+        assert tab.receive_json() == {"event": "open-request", "action": "open", "path": "lid.py"}
+    for _ in range(40):
+        if client.get("/api/health").json()["tabs"] == 0:
+            break
+        time.sleep(0.05)
+    assert client.get("/api/health").json()["tabs"] == 0
+
+
+def test_shutdown_asks_the_server_to_exit(client):
+    class Server:
+        should_exit = False
+
+    assert client.post("/api/shutdown").json()["stopping"] is False  # no uvicorn under the test client
+    fake = Server()
+    client.app.state.server = fake
+    assert client.post("/api/shutdown").json()["stopping"] is True and fake.should_exit
+    health = client.get("/api/health").json()
+    assert health["pid"] and health["idle_minutes"] == 0

@@ -5,7 +5,7 @@ import { RequestLane, documentEpoch, invalidateDocumentRequests } from './reques
 import { syncSketchFrame } from './sketch';
 import { cancelDocumentTools, dragState, setStatus } from './tools';
 import { loadViews } from './views';
-import type { EditOp, EditResult } from '../api/types';
+import type { EditOp, EditResult, ImportItem } from '../api/types';
 import type { State } from './core';
 
 let unsubscribeEvents: (() => void) | null = null;
@@ -21,9 +21,82 @@ export async function start() {
   try {
     const docs = await api.listDocuments();
     set({ docs, status: docs.length ? 'ready' : 'no documents open' });
+    await refreshFiles();
+    unsubscribeWorkspace?.();
+    unsubscribeWorkspace = api.workspaceEvents((e) => { if (e.event === 'open-request') handleOpenRequest(e); });
     if (docs.length) await useDocument(docs[0].id);
+    await openFromQuery();
   } catch (e) {
     set({ error: `cannot reach the server: ${(e as Error).message}`, status: 'offline' });
+  }
+}
+
+// ---- files from outside the project -----------------------------------------
+
+let unsubscribeWorkspace: (() => void) | null = null;
+
+/** What `plainsolid open` or a launcher asked for: a project file opens; a STEP file from
+ * elsewhere waits for the import dialog, which copies it in. */
+export function handleOpenRequest(e: { action: 'open'; path: string } | { action: 'import'; source: string; name: string; suffix: string }) {
+  if (e.action === 'open') void openDocument(e.path);
+  else requestImport([{ name: e.name, suffix: e.suffix, source: e.source }]);
+}
+
+/** `?open=path` and `?import=/abs/file.step` on the page URL, which `plainsolid open` uses when
+ * no tab was there to hand the files to; read once and stripped, so a reload does not repeat them. */
+async function openFromQuery() {
+  if (typeof location === 'undefined' || !location.search) return;
+  const q = new URLSearchParams(location.search);
+  const opens = q.getAll('open'), imports = q.getAll('import');
+  if (!opens.length && !imports.length) return;
+  history.replaceState(null, '', location.pathname);
+  for (const p of opens) await openDocument(p);
+  requestImport(imports.map((source) => {
+    const base = source.split('/').pop() ?? source;
+    const dot = base.lastIndexOf('.');
+    return { name: dot > 0 ? base.slice(0, dot) : base, suffix: dot > 0 ? base.slice(dot) : '', source };
+  }));
+}
+
+/** Queue STEP files for the import dialog; the first one shows. */
+export function requestImport(items: ImportItem[]) {
+  if (items.length) set({ imports: [...state.imports, ...items] });
+}
+
+export function skipImport() {
+  set({ imports: state.imports.slice(1) });
+}
+
+/** Copy the first queued file into the project as folder/name.suffix and open the copy. On
+ * failure the file stays queued, so the dialog can take another name. */
+export async function importNext(folder: string, name: string): Promise<boolean> {
+  const item = state.imports[0];
+  if (!item) return false;
+  set({ loading: true, error: null });
+  try {
+    const tree = item.source !== undefined
+      ? await api.importFile(item.source, folder, name)
+      : await api.uploadFile(item.file as Blob, folder, name, item.suffix);
+    set({ imports: state.imports.filter((i) => i !== item) });
+    const docs = await api.listDocuments();
+    set({ docs });
+    if (await useDocument(tree.id)) set({ status: `imported ${folder ? `${folder}/` : ''}${name}${item.suffix}` });
+    else set({ loading: false });
+    void refreshFiles();
+    return true;
+  } catch (e) {
+    set({ error: (e as Error).message, loading: false });
+    return false;
+  }
+}
+
+/** Stop the server; every tab loses it. */
+export async function quitServer() {
+  try {
+    await api.shutdown();
+    set({ status: 'server stopped', error: 'the server was stopped; run plainsolid serve, or open a STEP file from the file manager, to start it again' });
+  } catch (e) {
+    set({ error: (e as Error).message });
   }
 }
 

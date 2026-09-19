@@ -8,6 +8,7 @@ from __future__ import annotations
 import keyword
 import os
 import re
+import shutil
 import tempfile
 import threading
 from collections.abc import Callable
@@ -312,6 +313,45 @@ class Workspace:
         if not wrapper.exists():
             wrapper.write_text(wrapper_source(step.name, step_kind(step, node), node), encoding="utf-8")
         return wrapper
+
+    def locate(self, path: str | Path) -> dict[str, Any]:
+        """How a local file would open here: `{"action": "open", "path": rel}` for a file
+        inside the project, `{"action": "import", "source": abs, "name": stem, "suffix": ...}`
+        for a STEP file elsewhere, which has to be copied in first."""
+        p = Path(path).expanduser().resolve()
+        if not p.exists():
+            raise FileNotFoundError(p)
+        if p.is_relative_to(self.root):
+            return {"action": "open", "path": p.relative_to(self.root).as_posix()}
+        if p.suffix.lower() in STEP_SUFFIXES:
+            return {"action": "import", "source": str(p), "name": p.stem, "suffix": p.suffix}
+        raise ValueError(f"{p} is outside the project, and only STEP files are imported")
+
+    def import_file(self, folder: str, name: str, suffix: str, *, source: str | Path | None = None,
+                    data: bytes | None = None) -> OpenDocument:
+        """Copy a STEP file into the project, from a local path or from bytes, as
+        `folder/name.suffix`, then open it. The original is never touched. Refuses to
+        overwrite, and anything but STEP."""
+        if suffix.lower() not in STEP_SUFFIXES:
+            raise ValueError(f"only STEP files are imported, not {suffix or 'a file without a suffix'}")
+        stem = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in name.strip()).strip("._")
+        if not stem:
+            raise ValueError("the name is empty")
+        target = self._inside(Path(folder or ".") / f"{stem}{suffix}")
+        if target.exists():
+            raise FileExistsError(target)
+        if source is not None:
+            source = Path(source).expanduser().resolve()
+            if not source.is_file():
+                raise FileNotFoundError(source)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp = target.with_name(f".{target.name}.tmp")
+        if source is not None:
+            shutil.copyfile(source, tmp)
+        else:
+            tmp.write_bytes(data or b"")
+        os.replace(tmp, target)
+        return self.open(target)
 
     def create(self, path: str | Path, kind: str = "part", name: str | None = None,
                material: str = "al6061", of: str | None = None) -> OpenDocument:

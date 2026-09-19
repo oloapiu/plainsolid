@@ -8,12 +8,14 @@ import {
   dismissViewsWarning, isAssembly, isDrawing, fmt, requestPick,
   closeDocument, exportDocument, setMoveMode,
   setOverlay, requestDelete, select, openFeatureDialog, openPlaneDialog, setDrawingTool, setDeleteConfirm,
+  requestImport, quitServer,
 } from './state/store';
 import { DrawingSheet } from './drawing/DrawingSheet';
 import { Menu } from './Menu';
 import { Help } from './Help';
 import { ContextMenu } from './menu/ContextMenu';
-import { OpenMenu, NewMenu } from './FilesMenu';
+import { OpenMenu, NewMenu, ImportDialog } from './FilesMenu';
+import type { ImportItem } from './api/types';
 
 const readNumber = (key: string, fallback: number) => { try { return Number(localStorage.getItem(key)) || fallback; } catch { return fallback; } };
 /** The viewport never gets narrower than this; the side panels give way first. */
@@ -132,6 +134,22 @@ export function App() {
   }, [tool, pickRequest, tree, sketchMode, help, featureDialog, planeDialog, drawingTool, selected, selectedFace, selectedEdge, selectedItem, deleteConfirm, docs, docId]);
 
   const drawing = isDrawing(tree);
+  // a STEP file dropped anywhere on the window is offered to the import dialog, which copies it in
+  const onDragOver = (e: React.DragEvent) => { if (Array.from(e.dataTransfer.types).includes('Files')) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; } };
+  const onDrop = (e: React.DragEvent) => {
+    const dropped = Array.from(e.dataTransfer.files);
+    if (!dropped.length) return;
+    e.preventDefault();
+    const items: ImportItem[] = [], rejected: string[] = [];
+    for (const f of dropped) {
+      const dot = f.name.lastIndexOf('.');
+      const suffix = dot > 0 ? f.name.slice(dot) : '';
+      if (/^\.(step|stp)$/i.test(suffix)) items.push({ name: f.name.slice(0, dot), suffix, file: f });
+      else rejected.push(f.name);
+    }
+    if (rejected.length) setError(`only STEP files are imported, not ${rejected.join(', ')}`);
+    requestImport(items);
+  };
   const exportStep = () => {
     const name = String(tree?.meta.name ?? 'model');
     if (drawing) {
@@ -177,7 +195,7 @@ export function App() {
   const rows = `36px ${viewsWarning ? '24px ' : ''}1fr ${codeOpen ? Math.min(600, Math.max(120, codeHeight)) : 24}px 22px`;
 
   return (
-    <div className="app" style={{ gridTemplateRows: rows }}>
+    <div className="app" style={{ gridTemplateRows: rows }} onDragOver={onDragOver} onDrop={onDrop}>
       <div className="toolbar">
         <span className="brand">plainsolid</span>
         <div className="doc-tabs" data-testid="doc-tabs">
@@ -193,21 +211,24 @@ export function App() {
         </div>
         <OpenMenu compare={compareOpen} onCompareDone={() => setCompareOpen(false)} openSignal={openSignal} />
         <NewMenu />
+        <ImportDialog />
         <span className="spacer" />
         <div className="btn-group">
           <button className="btn-small btn-glyph" onClick={undo} title="undo (ctrl+z)" data-testid="undo">↶</button>
           <button className="btn-small btn-glyph" onClick={redo} title="redo (ctrl+shift+z)" data-testid="redo">↷</button>
         </div>
-        <Menu label="file" title="snapshot, export and compare" testId="file-menu" disabled={!tree}>
-          {!drawing && <button className="btn-small" type="button" onClick={snapshot} title="save the viewport as PNG and copy it" data-testid="snapshot">snapshot</button>}
-          <button className="btn-small" type="button" onClick={exportStep} data-testid="export-step"
-            title={drawing ? 'write the sheet to a PDF, DXF or SVG file' : 'write the part, or the posed assembly with its instance names and colours, to a STEP file'}>{drawing ? 'export…' : 'export STEP'}</button>
-          {!drawing && !overlay && <button className="btn-small" type="button" data-testid="compare-file"
+        <Menu label="file" title="snapshot, export, compare, quit" testId="file-menu">
+          {tree && !drawing && <button className="btn-small" type="button" onClick={snapshot} title="save the viewport as PNG and copy it" data-testid="snapshot">snapshot</button>}
+          {tree && <button className="btn-small" type="button" onClick={exportStep} data-testid="export-step"
+            title={drawing ? 'write the sheet to a PDF, DXF or SVG file' : 'write the part, or the posed assembly with its instance names and colours, to a STEP file'}>{drawing ? 'export…' : 'export STEP'}</button>}
+          {tree && !drawing && !overlay && <button className="btn-small" type="button" data-testid="compare-file"
             title="overlay another document: what this one adds is green, what it lacks red"
             onClick={() => setCompareOpen(true)}>compare with…</button>}
-          {!drawing && !overlay && <button className="btn-small" type="button" data-testid="compare-head"
+          {tree && !drawing && !overlay && <button className="btn-small" type="button" data-testid="compare-head"
             title="overlay this file as last committed to git" onClick={() => void setOverlay({ rev: 'HEAD' })}>compare with last commit</button>}
-          {overlay && <button className="btn-small" type="button" data-testid="compare-stop" onClick={() => void setOverlay(null)}>stop comparing</button>}
+          {tree && overlay && <button className="btn-small" type="button" data-testid="compare-stop" onClick={() => void setOverlay(null)}>stop comparing</button>}
+          <button className="btn-small danger" type="button" data-testid="quit-server" title="stop the server; every tab of the app loses it until plainsolid serve runs again"
+            onClick={() => void quitServer()}>quit server</button>
         </Menu>
       </div>
       {viewsWarning && <div className="views-warning">{viewsWarning} <button className="btn-small" onClick={dismissViewsWarning}>ok</button></div>}

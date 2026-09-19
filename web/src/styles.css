@@ -370,3 +370,8 @@ table.bom td:last-child { text-align: right; }
 .side-toggle { width: 16px; height: 16px; font-size: 10px; line-height: 14px; top: 4px; }
 .left.collapsed .side-toggle, .right.collapsed .side-toggle { height: 44px; line-height: 42px; }
 .param-add .btn-small { grid-column: 1 / 4; justify-self: end; }  /* the button below the two inputs, so a narrow panel keeps the value field usable */
+
+/* the import dialog: a STEP file from outside the project, on its way in */
+.import-pop { position: fixed; top: 44px; left: 50%; transform: translateX(-50%); z-index: 45; width: 380px; max-width: 90vw; background: var(--bg2); border: 1px solid var(--line); border-radius: 4px; padding: 8px; box-shadow: 0 6px 18px rgba(0,0,0,0.4); }
+.import-pop input { width: 100%; background: var(--bg3); border: 1px solid var(--line); border-radius: 3px; padding: 3px 6px; font-family: var(--mono); min-width: 0; }
+.import-pop .files-field { grid-template-columns: 44px 1fr; }

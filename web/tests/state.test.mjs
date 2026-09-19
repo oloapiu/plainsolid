@@ -50,6 +50,8 @@ async function fixture() {
     edit: async id => { calls.push(['edit', id]); update(id, 'edited'); return { hash: docs[id].hash, changed: true }; },
     closeDocument: async id => { calls.push(['close', id]); delete docs[id]; return { documents: Object.keys(docs).map(id => ({ id })) }; },
     events: (id, cb) => { events.set(id, cb); return () => events.delete(id); },
+    files: async () => ({ root: '/p', files: [] }),
+    workspaceEvents: () => () => {},
   };
   const modules = new Map();
   const synthetic = (name, values) => new vm.SyntheticModule(Object.keys(values), function () {
@@ -381,4 +383,31 @@ test('a document without a saved camera asks the viewport for a fit; a saved cam
   await s.useDocument('b');
   assert.equal(s.getState().fitPending, false);
   assert.deepEqual(s.getState().cameraToApply, { position: [1, 2, 3] });
+});
+
+test('an import copies the file where the dialog said and opens the copy', async () => {
+  const { store: s, api, docs, calls } = await fixture();
+  api.importFile = async (source, folder, name) => {
+    calls.push(['import', source, folder, name]);
+    docs.c = { source: 'the wrapper', hash: 'c1', revision: 'c-geometry-1' };
+    return { id: 'c' };
+  };
+  s.handleOpenRequest({ action: 'import', source: '/Users/me/Downloads/node_v4.step', name: 'node_v4', suffix: '.step' });
+  s.requestImport([{ name: 'gland', suffix: '.stp', file: {} }]);
+  assert.deepEqual([...s.getState().imports.map(i => i.name)], ['node_v4', 'gland']);  // a host array: the store's lives in the vm realm
+  assert.equal(await s.importNext('node-s/proposals', 'node_v4'), true);
+  assert.deepEqual(calls.filter(c => c[0] === 'import'), [['import', '/Users/me/Downloads/node_v4.step', 'node-s/proposals', 'node_v4']]);
+  assert.equal(s.getState().docId, 'c');
+  assert.deepEqual([...s.getState().imports.map(i => i.name)], ['gland']);
+  s.skipImport();
+  assert.equal(s.getState().imports.length, 0);
+});
+
+test('a failed import keeps the file queued for another name', async () => {
+  const { store: s, api } = await fixture();
+  api.importFile = async () => { throw new Error('already exists: node_v4.step'); };
+  s.requestImport([{ name: 'node_v4', suffix: '.step', source: '/Users/me/Downloads/node_v4.step' }]);
+  assert.equal(await s.importNext('proposals', 'node_v4'), false);
+  assert.equal(s.getState().imports.length, 1);
+  assert.equal(s.getState().error, 'already exists: node_v4.step');
 });

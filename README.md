@@ -177,15 +177,27 @@ bracket_dwg.py -o bracket.pdf`.
 
 ## Reviewing a STEP file from the contract manufacturer
 
+Drop the file on the app's window: one dialog asks for the folder and the
+name, the file is copied into the project (the original stays where it was)
+and opens as a viewer to section, measure, pin and snapshot. From the file
+manager, `uv run plainsolid install-launcher` adds "Open in plainsolid" to the
+Finder's right-click Quick Actions (should that submenu show only
+"Customize…", pick it and tick "Open in plainsolid"), or registers plainsolid
+for STEP files on a Linux desktop; it starts the server when none is running.
+From a terminal:
+
 ```sh
-uv run plainsolid tree proposals/node_v3.step          # writes node_v3.py next to it, prints the instance tree
-uv run plainsolid render proposals/node_v3.py -o cut.png --plane XY --offset 12
-uv run plainsolid measure proposals/node_v3.py face:12 face:40 --plane XY --offset 12
-uv run plainsolid compare proposals/node_v3.py proposals/node_v2.py -o changes.png   # what v3 adds (green) and removes (red)
-uv run plainsolid serve proposals --open node_v3.step  # section, measure, pin and snapshot in the browser
+uv run plainsolid open ~/Downloads/node_v3.step        # the running app, or a new server; the import dialog in the browser
+uv run plainsolid status                                # the server, its project and its open documents
+uv run plainsolid stop                                  # also "quit server" in the app's file menu
+uv run plainsolid tree cad/proposals/node_v3.step       # writes node_v3.py next to it, prints the instance tree
+uv run plainsolid render cad/proposals/node_v3.py -o cut.png --plane XY --offset 12
+uv run plainsolid measure cad/proposals/node_v3.py face:12 face:40 --plane XY --offset 12
+uv run plainsolid compare cad/proposals/node_v3.py cad/proposals/node_v2.py -o changes.png   # what v3 adds (green) and removes (red)
 ```
 
-Opening a `.step` file creates a small wrapper model file next to it, so the
+A server that `open` started stops by itself half an hour after the last tab
+closes. Opening a `.step` file creates a small wrapper model file next to it, so the
 review is a text document like everything else. Instance names, hierarchy and
 colours come through; view state (camera, section, pins, named views) lives
 in a `<name>.views.json` sidecar. A STEP file holding one solid opens as a

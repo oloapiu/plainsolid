@@ -1409,6 +1409,29 @@ check('new assembly creates an assembly file and an instance picked from the pro
   await page.setViewportSize({ width: 1400, height: 900 });
 }
 
+// `plainsolid open` with no tab open: the page URL names the files. A project file opens; a STEP
+// file from outside the project goes through the import dialog, which copies it in and opens the copy.
+{
+  const outside = path.resolve(PROJ, '..', `outside-${process.pid}.step`);
+  fs.copyFileSync(path.join(PROJ, 'vendor', 'node_stub.step'), outside);
+  await page.goto(`${URL}?open=lid.py&import=${encodeURIComponent(outside)}`);
+  await page.waitForSelector('[data-testid=doc-tab-lid]', { timeout: 20000 });
+  await page.waitForSelector('[data-testid=import-pop]', { timeout: 20000 });
+  check('the URL query opens the project file and offers the outside STEP file for import',
+        (await page.locator('[data-testid=import-name]').inputValue()) === `outside-${process.pid}` && !page.url().includes('?'));
+  await page.fill('[data-testid=import-folder]', 'proposals');
+  await page.fill('[data-testid=import-name]', 'node_v4');
+  await page.click('[data-testid=import-go]');
+  await page.waitForSelector('[data-testid=doc-tab-node_v4]', { timeout: 30000 });
+  await page.waitForFunction(() => !document.querySelector('[data-testid=import-pop]'), null, { timeout: 5000 });
+  check('the import copies the file into proposals/ and opens the copy',
+        fs.existsSync(path.join(PROJ, 'proposals', 'node_v4.step')) && fs.existsSync(path.join(PROJ, 'proposals', 'node_v4.py')) && fs.existsSync(outside));
+  fs.unlinkSync(outside);
+  await page.click('[data-testid=file-menu]');
+  check('the file menu offers to quit the server', (await page.locator('[data-testid=quit-server]').count()) === 1);
+  await page.keyboard.press('Escape');
+}
+
 check('no console or page errors', errors.length === 0, errors.slice(0, 3).join(' | '));
 await browser.close();
 const failed = results.filter(([, ok]) => !ok).length;
