@@ -31,25 +31,35 @@ A parametric bearing housing, from sketch to patterned features. Open the
 [included model](docs/examples/bearing_housing.py) with
 `uv run plainsolid serve docs/examples --open bearing_housing.py`.
 
-## Quick start
+## Getting started
 
 ```sh
 brew install uv            # or see https://docs.astral.sh/uv/
 uv sync                    # Python 3.13 environment with build123d and friends
-uv run pytest              # the test suite
-
-uv run plainsolid serve zoo --open bracket.py     # the app on http://127.0.0.1:8321
-uv run plainsolid new parts/mount.py             # a fresh part file, ready for a sketch
-uv run plainsolid query zoo/bracket.py summary
-uv run plainsolid query zoo/node.py bom             # the assembly's bill of materials; also mass, interference
-uv run plainsolid render zoo/bracket.py -o bracket.png --view iso
-uv run plainsolid export zoo/bracket.py -o bracket.step
-uv run plainsolid export zoo/node.py -o node.step   # the posed assembly with instance names and colours
-uv run plainsolid edit zoo/bracket.py '{"op":"set_parameter","name":"thickness","value":5}' --dry-run
+uv run plainsolid serve    # the app on http://127.0.0.1:8321
 ```
+
+Your documents live in `cad/` at the root of the checkout: gitignored, created
+on the first run, and the only place the app reads and writes. Press "new" for
+a part, or copy a STEP file into `cad/` and open it as a viewer. To look at the
+examples instead, `uv run plainsolid serve zoo --open bracket.py`; any other
+folder works the same way with `plainsolid serve DIR`. Keep in mind that `cad/`
+is yours: git ignores it, and `git clean -x` would delete it.
 
 The browser client is bundled into the Python package, so `plainsolid serve`
 alone runs the whole app. To work on the client, see [web/README.md](web/README.md).
+`uv tool install --editable .` puts `plainsolid` on your PATH, to run it from
+any directory.
+
+Everything the app does is also a command:
+
+```sh
+uv run plainsolid new cad/mount.py                  # a fresh part file, ready for a sketch
+uv run plainsolid query zoo/node.py bom             # the assembly's bill of materials; also mass, interference
+uv run plainsolid render zoo/bracket.py -o bracket.png --view iso
+uv run plainsolid export zoo/node.py -o node.step   # the posed assembly with instance names and colours
+uv run plainsolid edit zoo/bracket.py '{"op":"set_parameter","name":"thickness","value":5}' --dry-run
+```
 
 ## A model file
 

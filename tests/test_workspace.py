@@ -67,3 +67,17 @@ def test_create_from_template(project):
         ws.create("parts/mount.py")
     r = ws.apply(doc, {"op": "add_feature", "kind": "sketch", "name": "sketch1", "args": {"on": "XY"}}, doc.hash)
     assert r["changed"] and 'sketch1 = sketch("sketch1", on=XY)' in doc.source
+
+
+def test_open_and_create_stay_inside_the_project(project, tmp_path_factory):
+    """A path outside the served directory is refused, so no wrapper, sidecar or new
+    document is ever written elsewhere by mistake; folders inside are created."""
+    ws = Workspace(project)
+    outside = tmp_path_factory.mktemp("elsewhere")
+    (outside / "part.py").write_text((project / "bracket.py").read_text())
+    with pytest.raises(ValueError, match="outside the project"):
+        ws.open(outside / "part.py")
+    with pytest.raises(ValueError, match="outside the project"):
+        ws.create(f"../{outside.name}/new.py")
+    assert not (outside / "new.py").exists()
+    assert ws.create("parts/new.py").path == (project / "parts" / "new.py").resolve()

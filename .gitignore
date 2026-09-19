@@ -16,6 +16,9 @@ web/dist/
 .plainsolid-cache/
 corpus/
 
+# your documents: the default project (see the README)
+cad/
+
 # tests
 tests/**/actual_*.png
 playwright-report/

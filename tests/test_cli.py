@@ -2,6 +2,7 @@
 import json
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
@@ -136,3 +137,27 @@ def test_compare_command_and_docs(project):
     assert code == 1
     code, out = run("docs")
     assert code == 0 and "add_sketch_entity" in out
+
+
+def test_serve_and_mcp_default_to_the_checkouts_cad_folder(tmp_path, monkeypatch):
+    """No argument: cad/ in the plainsolid checkout, created by serve; an argument wins;
+    outside a checkout there is no default and the command asks for one."""
+    import plainsolid.cli
+    import plainsolid.mcpserver
+    import plainsolid.server
+    assert plainsolid.cli._checkout() == Path(plainsolid.cli.__file__).resolve().parents[2]
+    seen = {}
+    monkeypatch.setattr(plainsolid.server, "serve", lambda root, **kw: seen.__setitem__("serve", root))
+    monkeypatch.setattr(plainsolid.mcpserver, "serve", lambda root: seen.__setitem__("mcp", root))
+    monkeypatch.setattr(plainsolid.cli, "_checkout", lambda: tmp_path)
+    assert runner.invoke(app, ["serve"]).exit_code == 0
+    assert seen["serve"] == tmp_path / "cad" and (tmp_path / "cad").is_dir()
+    assert runner.invoke(app, ["mcp"]).exit_code == 0
+    assert seen["mcp"] == tmp_path / "cad"
+    other = tmp_path / "other"
+    other.mkdir()
+    assert runner.invoke(app, ["serve", str(other)]).exit_code == 0
+    assert seen["serve"] == other.resolve()
+    monkeypatch.setattr(plainsolid.cli, "_checkout", lambda: None)
+    result = runner.invoke(app, ["serve"])
+    assert result.exit_code == 1 and "pass one" in result.output

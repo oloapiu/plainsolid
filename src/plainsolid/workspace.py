@@ -263,14 +263,22 @@ class Workspace:
 
     # --- documents ---------------------------------------------------------
 
-    def open(self, path: str | Path) -> OpenDocument:
-        """A model file, a STEP file (through its wrapper), or `x.step#node`: one
-        sub-assembly of the file as a document of its own."""
-        text, node = split_fragment(str(path))
-        p = Path(text)
+    def _inside(self, path: str | Path) -> Path:
+        """`path` resolved against the project root; refused outside it, so wrappers,
+        sidecars and new documents can never land elsewhere by mistake."""
+        p = Path(path).expanduser()
         if not p.is_absolute():
             p = self.root / p
         p = p.resolve()
+        if not p.is_relative_to(self.root):
+            raise ValueError(f"{p} is outside the project {self.root}: copy it into the project first")
+        return p
+
+    def open(self, path: str | Path) -> OpenDocument:
+        """A model file, a STEP file (through its wrapper), or `x.step#node`: one
+        sub-assembly of the file as a document of its own. Inside the project only."""
+        text, node = split_fragment(str(path))
+        p = self._inside(text)
         if p.suffix.lower() in STEP_SUFFIXES:
             if not p.exists():
                 raise FileNotFoundError(p)
@@ -307,13 +315,11 @@ class Workspace:
 
     def create(self, path: str | Path, kind: str = "part", name: str | None = None,
                material: str = "al6061", of: str | None = None) -> OpenDocument:
-        """Write a new model file from the template and open it. Refuses to overwrite."""
-        p = Path(path)
-        if not p.is_absolute():
-            p = self.root / p
+        """Write a new model file from the template and open it, inside the project
+        only. Refuses to overwrite."""
+        p = self._inside(path)
         if p.suffix != ".py":
             p = p.with_suffix(".py")
-        p = p.resolve()
         if p.exists():
             raise FileExistsError(p)
         stem = name or p.stem

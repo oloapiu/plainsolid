@@ -155,7 +155,7 @@ Views and manual dimensions, not full drafting.
 | CLI | Runs the engine in-process. JSON output on every command. The MCP server is the same engine as tools on stdio, re-reading a file the GUI changed before every call. |
 | View state | Camera, named views, section, per-instance visibility and transparency live in a sidecar JSON next to each document. Git-tracked, ignored if missing or malformed, never referenced by the model file. |
 | Mesh cache | Product tessellations are kept in memory and on disk (`.plainsolid-cache/`, gitignored), keyed by file, node and tolerance, never by pose. Derived state only. |
-| Layout | A flat project directory with a `vendor/` folder for STEP files. |
+| Layout | The project is one directory: `cad/` in the checkout by default (gitignored), or the one given to `serve`. Documents are only ever opened and written inside it. Flat, with `vendor/` for bought STEP files and `proposals/` for the manufacturer's. |
 | Export | STEP for parts and posed assemblies with names and colours, STL; drawings to SVG, DXF and PDF. |
 
 ### Tooling
@@ -371,7 +371,7 @@ browser's types.
 ### The CLI
 
 ```
-plainsolid serve [dir] --open FILE --port N
+plainsolid serve [dir] --open FILE --port N   dir: cad/ in the checkout by default; created if missing
 plainsolid new FILE [--kind assembly | --kind drawing --of MODEL] [--name N] [--material M]
 plainsolid tree FILE                     also accepts a .step file
 plainsolid query FILE KIND [--upto F]
@@ -382,7 +382,7 @@ plainsolid compare FILE [OTHER | --rev REV] [-o overlay.png]
 plainsolid export FILE -o out.step|out.stl     a drawing: out.pdf|out.dxf|out.svg
 plainsolid mesh FILE -o out.bin [--plane ...]
 plainsolid docs                          the agent guide
-plainsolid mcp [dir]                     the engine as MCP tools on stdio
+plainsolid mcp [dir]                     the engine as MCP tools on stdio; dir as for serve
 ```
 
 ### Repository layout
@@ -397,6 +397,7 @@ plainsolid/
   scripts/            bench.py, generate_edit_types.py
   docs/               this document, testing.md, images
   corpus/             real vendor and manufacturer files, local only, never committed
+  cad/                your documents: the default project, gitignored
   .github/workflows/  CI
 ```
 

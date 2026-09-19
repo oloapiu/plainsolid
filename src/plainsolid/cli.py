@@ -25,6 +25,25 @@ from .stepimport import split_fragment
 from .workspace import StaleHashError, Workspace
 
 GUIDE = Path(__file__).parent / "agent.md"
+DEFAULT_PROJECT = "cad"
+ROOT_HELP = f"project directory; defaults to {DEFAULT_PROJECT}/ in the plainsolid checkout"
+
+
+def _checkout() -> Path | None:
+    """The plainsolid checkout this tool runs from (an editable install), else None."""
+    repo = Path(__file__).resolve().parents[2]
+    return repo if (repo / "pyproject.toml").is_file() and (repo / "src" / "plainsolid").is_dir() else None
+
+
+def _root(root: Path | None) -> Path:
+    """The project directory: the argument, else `cad/` in the checkout. Never a guess
+    such as the current directory, so documents cannot land somewhere by mistake."""
+    if root is not None:
+        return root.expanduser().resolve()
+    checkout = _checkout()
+    if checkout is None:
+        _fail(f"no default project directory outside a plainsolid checkout: pass one, e.g. plainsolid serve ~/{DEFAULT_PROJECT}")
+    return checkout / DEFAULT_PROJECT
 
 
 def _open(file: Path):
@@ -270,12 +289,12 @@ def mesh(file: Path, output: Path = typer.Option(Path("mesh.bin"), "-o", "--outp
 
 
 @app.command()
-def mcp(root: Path = typer.Argument(Path("."), help="project directory")) -> None:
+def mcp(root: Path | None = typer.Argument(None, help=ROOT_HELP, show_default=False)) -> None:
     """Serve the engine to an agent over the Model Context Protocol on stdio
     (`claude mcp add plainsolid -- plainsolid mcp DIR`); `plainsolid docs` is the guide."""
     from .mcpserver import serve as _serve
 
-    _serve(root)
+    _serve(_root(root))
 
 
 @app.command()
@@ -285,13 +304,17 @@ def docs() -> None:
 
 
 @app.command()
-def serve(root: Path = typer.Argument(Path("."), help="project directory"),
+def serve(root: Path | None = typer.Argument(None, help=ROOT_HELP, show_default=False),
           port: int = 8321, host: str = "127.0.0.1",
-          open: list[Path] = typer.Option([], "--open", help="documents to open at start")) -> None:
-    """Start the local API server (and the bundled client, if built)."""
+          open: list[Path] = typer.Option([], "--open", help="documents to open at start, relative to the project")) -> None:
+    """Start the local API server (and the bundled client, if built) on a project
+    directory, created when it does not exist yet. Documents are only ever opened
+    and written inside it."""
     from .server import serve as _serve
 
-    _serve(root, host=host, port=port, open_paths=[str(p) for p in open])
+    directory = _root(root)
+    directory.mkdir(parents=True, exist_ok=True)
+    _serve(directory, host=host, port=port, open_paths=[str(p) for p in open])
 
 
 def main() -> None:
