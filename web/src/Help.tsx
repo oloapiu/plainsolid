@@ -39,7 +39,7 @@ export function Help({ onClose }: { onClose: () => void }) {
             <h3>sketch</h3>
             <table><tbody>
               <Row keys={['l', 'c', 'a', 'r', 's', 'p', 'o']} what="line, circle, arc, rect, slot, polygon, point" />
-              <Row keys={['d']} what="dimension the selection, then click to place it" />
+              <Row keys={['d']} what="the dimension tool: click an entity or two, click empty space to place, type the value; stays on until esc or d" />
               <Row keys={['e']} what="convert body edges, vertices or a face outline" />
               <Row keys={['x']} what="the construction switch: new geometry, converts and offsets come out as construction while it is on" />
               <Row keys={['right-click']} what="relations, a dimension, offset, construction or delete for the selection; tools on empty space" />

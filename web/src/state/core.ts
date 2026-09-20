@@ -19,7 +19,7 @@ import type {
   ViewSnapshot,
   ImportItem,
 } from '../api/types';
-import type { DimensionPlan } from '../sketch/model';
+import type { DimLock } from '../sketch/model';
 
 export type Plane = 'XY' | 'XZ' | 'YZ';
 export type SketchTool = 'line' | 'circle' | 'arc' | 'rect' | 'slot' | 'polygon' | 'point' | 'dimension' | 'project' | 'offset' | null;
@@ -42,7 +42,7 @@ export interface SketchMode {
   dragging: string | null;      // the reference being dragged
   locked: boolean;              // the last drag preview did not move the point
   solveMs: number | null;
-  dimPlacing: DimensionPlan | null;  // dimension tool: waiting for a label placement click
+  dimLock: DimLock;             // dimension tool: how a pair of points is measured, when locked from the menu
   dimEditing: string | null;    // constraint name whose value field is open
 }
 

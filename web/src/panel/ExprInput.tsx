@@ -3,11 +3,13 @@ import { useEffect, useRef, useState } from 'react';
 // A text field for numbers and expressions with autocomplete over parameter and
 // dimension names. The suggestion list follows the identifier under the caret, so
 // `wall * 2` and `holes.d1 + 1` both complete.
-export function ExprInput({ text, names, onCommit, onCancel, disabled, autoFocus, className, placeholder, testId, commitUnchanged }: {
+export function ExprInput({ text, names, onCommit, onCancel, disabled, autoFocus, className, placeholder, testId, commitUnchanged, commitOnBlur }: {
   text: string; names: string[]; onCommit: (t: string) => void; onCancel?: () => void; disabled?: boolean;
   autoFocus?: boolean; className?: string; placeholder?: string; testId?: string;
   /** Commit on Enter even when the text did not change (a prefilled value being accepted). */
   commitUnchanged?: boolean;
+  /** Commit the text as it stands when focus leaves, changed or not: a value box that clicking away accepts. */
+  commitOnBlur?: boolean;
 }) {
   const [val, setVal] = useState(text);
   const [open, setOpen] = useState(false);
@@ -78,13 +80,13 @@ export function ExprInput({ text, names, onCommit, onCancel, disabled, autoFocus
     <span className={`expr-input ${className ?? ''}`}>
       <input ref={ref} value={val} disabled={disabled} placeholder={placeholder} data-testid={testId} spellCheck={false}
         onChange={(e) => { setVal(e.target.value); setOpen(true); setIndex(0); }}
-        onBlur={() => { if (timer.current) clearTimeout(timer.current); timer.current = setTimeout(() => { timer.current = null; setOpen(false); commit(); }, 120); }}
+        onBlur={() => { if (timer.current) clearTimeout(timer.current); timer.current = setTimeout(() => { timer.current = null; setOpen(false); commit(Boolean(commitOnBlur)); }, 120); }}
         onKeyDown={(e) => {
           if (suggestions.length && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) { e.preventDefault(); setIndex((i) => (i + (e.key === 'ArrowDown' ? 1 : suggestions.length - 1)) % suggestions.length); return; }
           if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && step(e.key === 'ArrowUp' ? 1 : -1, e)) { e.preventDefault(); return; }
           if (suggestions.length && (e.key === 'Tab' || (e.key === 'Enter' && open))) { e.preventDefault(); accept(suggestions[index]); return; }
           if (e.key === 'Enter') { if (commitUnchanged) commit(true); (e.target as HTMLInputElement).blur(); }
-          if (e.key === 'Escape') { e.stopPropagation(); setOpen(false); setVal(text); onCancel?.(); (e.target as HTMLInputElement).blur(); }
+          if (e.key === 'Escape') { e.stopPropagation(); setOpen(false); setVal(text); committed.current = true; onCancel?.(); (e.target as HTMLInputElement).blur(); }
         }} />
       {suggestions.length > 0 && (
         <ul className="expr-suggest">

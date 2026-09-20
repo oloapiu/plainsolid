@@ -4,7 +4,7 @@ import {
   expressionNames, setSketchHighlight, deleteConstraint, setConstraintValue, unknownNames, setError, deleteFeature, openFeatureDialog, setSuppressed,
   fixInstance, fetchAssemblyQueries, fmt, makeEditable, openDocument, isDrawing, exportDocument, modelDocPath, setMeta,
   setOverlay, isViewer, setDeleteConfirm, fetchSummary, toggleSketchSelect, hoverRefs,
-  addConstraint, beginDimension, toggleConstructionSelection, setSketchTool, deleteSketchSelection, convertBodySelection, toggleBodySelect,
+  addConstraint, startDimension, toggleConstructionSelection, setSketchTool, deleteSketchSelection, convertBodySelection, toggleBodySelect,
 } from '../state/store';
 import { ParamPanel } from '../params/ParamPanel';
 import { PlaneDialog } from './PlaneDialog';
@@ -789,7 +789,7 @@ function SketchSelected({ f }: { f: Feature }) {
             {choices.map((c) => (
               <button key={c.kind} className="btn-small" data-testid={`constrain-${c.kind}`} onClick={() => void addConstraint(c.kind, c.refs, c.options)}>{c.label}</button>
             ))}
-            {plan && <button className="btn-small" data-testid="constrain-dimension" title="dimension the selection, then click to place it (d)" onClick={() => beginDimension(plan)}>{plan.kind}</button>}
+            {plan && <button className="btn-small" data-testid="constrain-dimension" title="the dimension tool with this selection: click to place it (d)" onClick={startDimension}>{plan.kind}</button>}
             {!choices.length && !plan && <span className="panel-help">no relation fits this selection</span>}
           </div>
           <div className="btn-row">

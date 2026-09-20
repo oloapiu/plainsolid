@@ -331,7 +331,7 @@ def _add_constraint(lay: Layout, c: Constraint, x0: np.ndarray) -> None:
         sy.add(S.FixScalar(c.name, ci.radius, v / 2 if k == "diameter" else v))
     elif k == "angle":
         need(2)
-        sy.add(S.Angle(c.name, lay.line(r[0], what), lay.line(r[1], what), v))
+        sy.add(S.Angle(c.name, lay.line(r[0], what), lay.line(r[1], what), v, bool(c.options.get("reverse"))))
     else:
         raise SketchError(f"unknown constraint kind {k!r}")
 

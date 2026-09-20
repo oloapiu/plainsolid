@@ -192,6 +192,11 @@ def _pt(p) -> tuple[float, float]:
     return (float(x), float(y))
 
 
+def _at(at) -> dict[str, Any]:
+    """The label placement option of a dimension, when given."""
+    return {"at": _pt(at)} if at is not None else {}
+
+
 def _ref(value: Any, what: str) -> str:
     if isinstance(value, str) and value:
         return value
@@ -335,22 +340,27 @@ class SketchHandle(FeatureHandle):
 
     # --- dimensions ---------------------------------------------------------
 
-    def distance(self, name: str, a, b, value: float, *, along: str | None = None) -> SketchHandle:
+    # `at` is where the GUI shows the dimension's label, in sketch coordinates; the geometry
+    # does not depend on it and a dimension without one gets a computed default.
+
+    def distance(self, name: str, a, b, value: float, *, along: str | None = None, at=None) -> SketchHandle:
         if along not in (None, "x", "y"):
             raise ValueError(f"distance {name!r}: along must be 'x' or 'y'")
-        return self._constrain("distance", name, [a, b], value, **({"along": along} if along else {}))
+        return self._constrain("distance", name, [a, b], value, **({"along": along} if along else {}), **_at(at))
 
-    def length(self, name: str, line, value: float) -> SketchHandle:
-        return self._constrain("length", name, [line], value)
+    def length(self, name: str, line, value: float, *, at=None) -> SketchHandle:
+        return self._constrain("length", name, [line], value, **_at(at))
 
-    def diameter(self, name: str, circle, value: float) -> SketchHandle:
-        return self._constrain("diameter", name, [circle], value)
+    def diameter(self, name: str, circle, value: float, *, at=None) -> SketchHandle:
+        return self._constrain("diameter", name, [circle], value, **_at(at))
 
-    def radius(self, name: str, circle, value: float) -> SketchHandle:
-        return self._constrain("radius", name, [circle], value)
+    def radius(self, name: str, circle, value: float, *, at=None) -> SketchHandle:
+        return self._constrain("radius", name, [circle], value, **_at(at))
 
-    def angle(self, name: str, a, b, value: float) -> SketchHandle:
-        return self._constrain("angle", name, [a, b], value)
+    def angle(self, name: str, a, b, value: float, *, reverse: bool = False, at=None) -> SketchHandle:
+        """The angle between the lines' directions, 0 to 180; reverse=True measures
+        against the second line's opposite direction (the supplementary sector)."""
+        return self._constrain("angle", name, [a, b], value, **({"reverse": True} if reverse else {}), **_at(at))
 
     def __getattr__(self, item: str) -> float:
         # dimension values by name: s.width

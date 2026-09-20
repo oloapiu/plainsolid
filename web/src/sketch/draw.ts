@@ -1,7 +1,7 @@
 // three.js drawing of the 2D sketch model on its plane.
 import * as THREE from 'three';
 import type { PlaneFrame } from '../viewport/scene';
-import type { Curve, Pt, SketchModel } from './model';
+import type { Curve, DimensionDrawing, Pt, SketchModel } from './model';
 import { sweep } from './model';
 
 export const COLORS = {
@@ -108,3 +108,16 @@ export function drawModel(frame: PlaneFrame, m: SketchModel, st: DrawState): THR
 
 export function snap(v: number, step = 1): number { return Math.round(v / step) * step; }
 export const round3 = (v: number) => Math.round(v * 1000) / 1000;
+
+/** A dimension: its lines and arrowheads, in one colour. Arrow sizes are in pixels at draw time. */
+export function drawDimension(frame: PlaneFrame, d: DimensionDrawing, color: number, px: number): THREE.Group {
+  const g = new THREE.Group();
+  for (const l of d.lines) g.add(polyline(frame, l, color));
+  const len = 7 * px, half = 2.2 * px;
+  for (const a of d.arrows) {
+    const n: Pt = [-a.dir[1], a.dir[0]];
+    const base: Pt = [a.tip[0] - a.dir[0] * len, a.tip[1] - a.dir[1] * len];
+    g.add(polyline(frame, [[base[0] + n[0] * half, base[1] + n[1] * half], a.tip, [base[0] - n[0] * half, base[1] - n[1] * half]], color));
+  }
+  return g;
+}

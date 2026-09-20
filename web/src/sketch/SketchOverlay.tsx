@@ -4,17 +4,17 @@ import * as THREE from 'three';
 import { sceneRef } from '../viewport/Viewport';
 import { frameFromInfo, type PlaneFrame } from '../viewport/scene';
 import {
-  useStore, edit, hoverEntity, exitSketch, featureByName, nextName, setSketchTool, setStatus, setError, sketchBatch, sketchNames, toggleSketchSelect, setSketchHover, startDrag, previewDrag, endDrag, cancelDragPreview, addConstraint, beginDimension, expressionNames, expressionValue, toggleConstructionMode, toggleConstructionSelection, type SketchTool, useBodyInRelation, selectorTarget, toggleBodySelect, convertBodySelection,
+  useStore, edit, hoverEntity, exitSketch, featureByName, nextName, setSketchTool, setStatus, setError, sketchBatch, sketchNames, toggleSketchSelect, setSketchHover, startDrag, previewDrag, endDrag, cancelDragPreview, addConstraint, startDimension, setDimLock, setSketchSelection, expressionNames, expressionValue, toggleConstructionMode, toggleConstructionSelection, type SketchTool, useBodyInRelation, selectorTarget, toggleBodySelect, convertBodySelection,
   openContextMenu, openFeatureDialog, deleteSketchSelection, getState, type MenuEntry,
 } from '../state/store';
 import { item, SEP } from '../menu/entries';
 import type { EditOp, JsonValue, PickedEntity } from '../api/types';
 import {
-  buildModel, hitTest, dragTarget, validConstraints, dimensionFor, dimensionGeometry, entityOf, fmtNum, mid, type DimensionPlan, type Pt, type SketchModel, refKind, curvePointsOf,
+  buildModel, hitTest, dragTarget, validConstraints, dimensionFor, dimensionDrawing, labelOf, dimText, entityOf, fmtNum, type DimensionDrawing, type DimensionPlan, type Pt, type SketchModel, refKind, curvePointsOf,
   curveOf, nearestOnCurve, CONSTRAINT_PREFIX,
 } from './model';
-import { drawModel, planeGrid, polyline, points, toWorld, disposeGroup, snap, round3, curvePoints, COLORS } from './draw';
-import { SketchLabels, type Placements } from './SketchLabels';
+import { drawModel, drawDimension, planeGrid, polyline, points, toWorld, disposeGroup, snap, round3, curvePoints, COLORS } from './draw';
+import { SketchLabels } from './SketchLabels';
 import { ExprInput } from '../panel/ExprInput';
 
 const TOOLS: { id: SketchTool; label: string; key: string; hint: string }[] = [
@@ -42,11 +42,9 @@ export function SketchOverlay() {
   const [nPoints, setNPoints] = useState(0);
   const [tick, setTick] = useState(0);
   const [pending, setPending] = useState<Pending | null>(null);
-  const [dimAlt, setDimAlt] = useState(0);
   const [snapGlyph, setSnapGlyph] = useState<{ x: number; y: number; text: string; title: string } | null>(null);
   const [offsetDistance, setOffsetDistance] = useState('2');  // the last distance used, offered again
-  const storageKey = `plainsolid:dims:${tree?.path ?? ''}:${sm.sketch}`;
-  const [placements, setPlacements] = useState<Placements>(() => loadPlacements(storageKey));
+  const [dragLabel, setDragLabel] = useState<{ name: string; p: Pt } | null>(null);  // a dimension label on its way somewhere
   const pointsRef = useRef<Snapped[]>([]);
   const preview = useRef<THREE.Object3D | null>(null);
   const group = useRef<THREE.Group | null>(null);
@@ -59,6 +57,21 @@ export function SketchOverlay() {
 
   const model = useMemo(() => (feature ? buildModel(feature, sm.preview) : null), [feature, sm.preview]);
   modelRef.current = model;
+  const picksKey = sm.selection.join(',');  // the tool effect follows the picks themselves, not just their count
+  // every dimension's lines and text position: the label from the file (or the default), overridden while it is dragged
+  const dims = useMemo(() => {
+    const out: Record<string, DimensionDrawing> = {};
+    if (!model) return out;
+    const px = sceneRef.current?.pixelSize() ?? 0.1;
+    for (const c of model.constraints) {
+      if (!c.dimension) continue;
+      const label = dragLabel?.name === c.name ? dragLabel.p : labelOf(model, c);
+      const d = label ? dimensionDrawing(model, c.kind, c.refs, c.options, label, px) : null;
+      if (d) out[c.name] = d;
+    }
+    return out;
+  }, [model, dragLabel]);
+  const dimTexts = useMemo(() => Object.fromEntries(Object.entries(dims).map(([k, d]) => [k, d.text])), [dims]);
 
   // frame, grid, camera, ghosted body, camera tick for the label layer
   useEffect(() => {
@@ -87,7 +100,6 @@ export function SketchOverlay() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sm.sketch, sm.frame]);
 
-  useEffect(() => { setPlacements(loadPlacements(storageKey)); }, [storageKey]);
   useEffect(() => { setTick((t) => t + 1); }, [mesh]);
 
   // the drawing: entities, handles, dimension lines
@@ -97,21 +109,19 @@ export function SketchOverlay() {
     if (group.current) { scene.overlay.remove(group.current); disposeGroup(group.current); }
     if (!model) return;
     const g = drawModel(frame, model, { selection: new Set(sm.selection), hover: sm.hover, highlight: new Set(sm.highlight) });
+    const px = scene.pixelSize();
     for (const c of model.constraints) {
-      if (!c.dimension) continue;
-      const geo = dimensionGeometry(model, c);
-      if (!geo) continue;
-      const label = placements[c.name] ?? geo.label;
+      const d = dims[c.name];
+      if (!c.dimension || !d) continue;
       const lit = sm.highlight.includes(c.name) || c.refs.some((r) => sm.highlight.includes(r));
       const color = model.solution?.conflicting?.includes(c.name) ? COLORS.conflict : lit ? COLORS.selected : 0xd8c27a;
-      g.add(polyline(frame, [geo.a, geo.b], color));
-      g.add(polyline(frame, [mid(geo.a, geo.b), label], color, true));
+      g.add(drawDimension(frame, d, color, px));
     }
     group.current = g;
     scene.overlay.add(g);
     scene.requestRender();
     setTick((t) => t + 1);
-  }, [model, sm.selection, sm.hover, sm.highlight, placements]);
+  }, [model, sm.selection, sm.hover, sm.highlight, dims]);
 
   // tool interaction
   useEffect(() => {
@@ -180,6 +190,7 @@ export function SketchOverlay() {
     const names = () => sketchNames();
     const sketch = sm.sketch;
     const asConstruction = sm.construction;
+    const picks = sm.selection;  // the dimension tool's picks are the selection
     const dashed = asConstruction;  // the rubber band draws like what it will make
     const entityOp = (kind: string, name: string, args: Record<string, JsonValue>): EditOp =>
       ({ op: 'add_sketch_entity', sketch, kind, name, args: asConstruction && kind !== 'point' ? { ...args, construction: true } : args });
@@ -231,10 +242,23 @@ export function SketchOverlay() {
       const p: Pt = [round3(u), round3(v)];
       setCursor(p);
       const pts = pointsRef.current;
-      if (!tool || tool === 'dimension') {
+      if (!tool) {
         const hit = m ? hitTest(m, [u, v], tol()) : null;
         setSketchHover(hit?.ref ?? null);
-        if (!tool) hoverEntity(hit ? null : body);  // a body edge or vertex lights up under a modifier
+        hoverEntity(hit ? null : body);  // a body edge or vertex lights up under a modifier
+        return;
+      }
+      if (tool === 'dimension') {
+        // the dimension the picks take follows the cursor until it is placed
+        const hit = m ? hitTest(m, [u, v], tol()) : null;
+        setSketchHover(hit?.ref ?? null);
+        const plan = m && !pendingRef.current ? dimensionFor(m, picks, [u, v], sm.dimLock) : null;
+        const d = m && plan ? dimensionDrawing(m, plan.kind, plan.refs, plan.options, [u, v], scene.pixelSize()) : null;
+        if (plan && d) {
+          setPreview(drawDimension(frame, d, COLORS.preview, scene.pixelSize()));
+          const [x, y] = scene.toScreen(toWorld(frame, d.text));
+          setSnapGlyph({ x, y, text: dimText(plan.kind, plan.value), title: plan.kind });
+        } else { setPreview(null); setSnapGlyph(null); }
         return;
       }
       if (tool === 'offset') { setSketchHover(null); return; }
@@ -273,9 +297,15 @@ export function SketchOverlay() {
       }
       if (tool === 'offset') { setPending({ kind: 'offset', at: [round3(u), round3(v)] }); return; }
       if (tool === 'dimension') {
-        if (sm.dimPlacing) { setPending({ kind: 'dimension', plan: sm.dimPlacing, at: [round3(u), round3(v)] }); setDimAlt(0); return; }
         const hit = m ? hitTest(m, [u, v], tol()) : null;
-        toggleSketchSelect(hit?.ref ?? null, true);
+        if (hit) {  // a pick: in or out of the picks, the newest two stay
+          setSketchSelection(picks.includes(hit.ref) ? picks.filter((r) => r !== hit.ref) : [...picks, hit.ref].slice(-2));
+          return;
+        }
+        const plan = m ? dimensionFor(m, picks, [u, v], sm.dimLock) : null;
+        if (!plan) { if (picks.length) setStatus('no dimension fits these picks'); return; }
+        setPreview(null); setSnapGlyph(null);
+        setPending({ kind: 'dimension', plan, at: [round3(u), round3(v)] });
         return;
       }
       const s = snapPoint(u, v);
@@ -339,7 +369,20 @@ export function SketchOverlay() {
         openContextMenu(ev.clientX, ev.clientY, out, `${tool} tool`);
         return;
       }
-      if (tool === 'dimension') { out.push(item('cancel the dimension', () => { setPending(null); setSketchTool(null); }, { key: 'esc' })); openContextMenu(ev.clientX, ev.clientY, out, 'dimension'); return; }
+      if (tool === 'dimension') {
+        // two points: lock how they are measured wherever the label goes
+        if (picks.length === 2 && m && picks.every((r) => refKind(m, r) === 'point' || refKind(m, r) === 'circle')) {
+          for (const [label, lock] of [['horizontal', 'x'], ['vertical', 'y'], ['aligned', 'aligned']] as const) {
+            out.push(item(label, () => setDimLock(lock), { title: `measure the ${label} distance wherever the label goes`, disabled: sm.dimLock === lock }));
+          }
+          out.push(SEP);
+        }
+        if (pendingRef.current) out.push(item('drop this dimension', () => { setPending(null); toggleSketchSelect(null, false); }, { key: 'esc' }));
+        else if (picks.length) out.push(item('clear the picks', () => toggleSketchSelect(null, false), { key: 'esc' }));
+        out.push(item('stop the dimension tool', () => { setPending(null); setSketchTool(null); }, { key: picks.length || pendingRef.current ? 'd' : 'esc' }));
+        openContextMenu(ev.clientX, ev.clientY, out, picks.length ? `dimension ${picks.join(' · ')}` : 'dimension');
+        return;
+      }
       if (tool === 'offset') { out.push(item('cancel the offset', () => { setPending(null); setSketchTool(null); }, { key: 'esc' })); openContextMenu(ev.clientX, ev.clientY, out, 'offset'); return; }
       if (tool === 'project') {
         if (body) out.push(item(body.kind === 'face' ? 'convert the face outline' : `convert this ${body.kind}`, () => void projectPick(body)));
@@ -354,7 +397,7 @@ export function SketchOverlay() {
         title = sel.join(' · ');
         for (const c of validConstraints(m, sel)) out.push(item(c.label, () => void addConstraint(c.kind, c.refs, c.options)));
         const plan = dimensionFor(m, sel);
-        if (plan) out.push(item(`dimension (${plan.kind})`, () => beginDimension(plan), { key: 'd' }));
+        if (plan) out.push(item(`dimension (${plan.kind})`, () => startDimension(), { key: 'd' }));
         const edits: MenuEntry[] = [];
         const curves = sel.filter((r) => refKind(m, r) !== 'point' && !r.endsWith('.axis'));
         if (curves.length) edits.push(item('offset…', () => setSketchTool('offset'), { title: 'click the side to offset to, then type the distance' }));
@@ -411,15 +454,16 @@ export function SketchOverlay() {
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.closest('.cm-editor'))) return;
       if (e.key === 'Escape') {
         // never leaves the sketch: that is the exit button's job
-        if (pendingRef.current) { setPending(null); setSketchTool(null); return; }
+        if (pendingRef.current) { const p = pendingRef.current; setPending(null); if (p.kind === 'dimension') toggleSketchSelect(null, false); else setSketchTool(null); return; }
         if (pointsRef.current.length) { reset(); chainRef.current = null; }
+        else if (tool === 'dimension' && picks.length) { toggleSketchSelect(null, false); }
         else if (tool) { setSketchTool(null); }
         else if (sm.selection.length || sm.bodySelection.length) { toggleSketchSelect(null, false); toggleBodySelect(null, false); }
         return;
       }
       if (e.key === 'Enter' && tool === 'polygon') { finishPolygon(); return; }
       if (e.key === 'Delete' || e.key === 'Backspace') { deleteSelection(); return; }
-      if (e.key === 'd' && !tool) { startDimension(); return; }
+      if (e.key === 'd' && (!tool || tool === 'dimension')) { if (tool === 'dimension') { setPending(null); setSketchTool(null); } else startDimension(); return; }
       if (e.key === 'e') { setSketchTool('project'); return; }
       if (e.key === 'x') { toggleConstructionMode(); return; }  // the switch, and only the switch
       const hit = TOOLS.find((x) => x.key === e.key);
@@ -437,7 +481,7 @@ export function SketchOverlay() {
       setPreview(null);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sm.tool, sm.sketch, sm.dimPlacing, sm.selection.length, sm.construction]);
+  }, [sm.tool, sm.sketch, picksKey, sm.dimLock, sm.construction]);
 
   /** Convert entities: a body edge, vertex or face outline becomes sketch geometry that follows the
    * body. Real profile geometry unless draw-as-construction is on; the tool stays on for more picks. */
@@ -482,28 +526,16 @@ export function SketchOverlay() {
     if (ok) { setStatus(`added ${name} ${side} of ${refs.length} curve${refs.length === 1 ? '' : 's'}`); setSketchTool(null); toggleSketchSelect(null, false); }
   };
 
-  const startDimension = () => {
-    if (!model) return;
-    const plan = dimensionFor(model, sm.selection);
-    beginDimension(plan);
-    if (!plan) setStatus(sm.selection.length ? 'no dimension fits this selection' : 'dimension: pick one or two entities, then click to place');
-  };
-
   const deleteSelection = () => void deleteSketchSelection();
 
   const commitPending = async (text: string) => {
     if (!pending) return;
     if (pending.kind === 'offset') { setPending(null); await commitOffset(pending.at, text); return; }
-    const plan = dimAlt > 0 && pending.plan.alternatives ? pending.plan.alternatives[dimAlt - 1] : pending.plan;
     const value = expressionValue(text);
     if (value === null) return;
-    const name = await addConstraint(plan.kind, plan.refs, plan.options, value);
-    if (name) place(name, pending.at);
     setPending(null);
-  };
-
-  const place = (name: string, p: Pt) => {
-    setPlacements((prev) => { const next = { ...prev, [name]: p }; try { localStorage.setItem(storageKey, JSON.stringify(next)); } catch { /* no storage */ } return next; });
+    const at = [Math.round(pending.at[0] * 10) / 10, Math.round(pending.at[1] * 10) / 10];
+    await addConstraint(pending.plan.kind, pending.plan.refs, { ...(pending.plan.options ?? {}), at }, value);
   };
 
   const scene = sceneRef.current;
@@ -512,7 +544,8 @@ export function SketchOverlay() {
   const sol = model?.solution ?? null;
   const dofText = sol ? (sol.fully_constrained ? 'fully constrained' : `${sol.dof} degree${sol.dof === 1 ? '' : 's'} of freedom`) : feature?.result?.error ? 'sketch failed' : '';
   const pendingScreen = pending && scene && frame ? scene.toScreen(toWorld(frame, pending.at)) : null;
-  const pendingPlan = pending?.kind === 'dimension' ? (dimAlt > 0 && pending.plan.alternatives ? pending.plan.alternatives[dimAlt - 1] : pending.plan) : null;
+  const pendingPlan = pending?.kind === 'dimension' ? pending.plan : null;
+  const planKind = sm.tool === 'dimension' && model && sm.selection.length ? dimensionFor(model, sm.selection)?.kind ?? null : null;
   const hoverText = sm.tool === 'project' && hover3d ? `${hover3d.kind} ${hover3d.id} · click to convert`
     : !sm.tool && hover3d ? `body ${hover3d.kind} ${hover3d.id} · click to select it for conversion · shift+click relates an edge or vertex` : sm.hover ?? '';
 
@@ -531,7 +564,9 @@ export function SketchOverlay() {
         <button className={`btn-small ${sm.tool === 'project' ? 'active' : ''} ${sm.construction && sm.tool === 'project' ? 'construction' : ''}`} title="convert body edges, vertices or a face outline into sketch geometry that follows the body (e); stays on until esc" data-testid="sketch-project" onClick={() => setSketchTool(sm.tool === 'project' ? null : 'project')}>convert</button>
         <span className="sketch-hint">
           {tool ? `${sm.construction ? 'construction · ' : ''}${tool.hint}${nPoints ? ` (${nPoints} placed)` : ''}`
-            : sm.tool === 'dimension' ? (sm.dimPlacing ? 'click to place the dimension' : 'pick one or two entities')
+            : sm.tool === 'dimension' ? (pending ? 'type the value, enter · esc drops it · clicking elsewhere keeps the measured value'
+              : sm.selection.length ? `${sm.selection.join(' · ')}: click empty space to place${planKind ? ` the ${planKind}` : ''}, or pick another entity · esc clears the picks`
+              : 'dimension: click an entity, or two, then click empty space to place it · esc stops')
             : sm.tool === 'project' ? (hoverText || `${sm.construction ? 'construction · ' : ''}hover the body: click edges, vertices or a face outline to convert them · esc when done`)
             : sm.tool === 'offset' ? (pending ? 'type the distance' : `offset ${sm.selection.length ? 'the selection' : 'the whole profile'}: click the side to offset to, then type the distance`)
             : sm.dragging ? (sm.locked ? 'locked: fully constrained' : 'dragging…')
@@ -550,28 +585,17 @@ export function SketchOverlay() {
         </div>
       ) : null}
       </div>
-      {scene && frame && model && <SketchLabels scene={scene} frame={frame} model={model} placements={placements} onPlace={place} tick={tick} />}
+      {scene && frame && model && <SketchLabels scene={scene} frame={frame} model={model} texts={dimTexts} onDragLabel={(name, p) => setDragLabel(p ? { name, p } : null)} tick={tick} />}
       {snapGlyph && sm.tool && <span className="snap-glyph" style={{ left: snapGlyph.x + 16, top: snapGlyph.y - 16 }} title={snapGlyph.title} data-testid="snap-glyph">{snapGlyph.text}</span>}
       {pending && pendingScreen && (
         <div className="dim-label editing pending" style={{ left: pendingScreen[0], top: pendingScreen[1] }} data-testid={pending.kind === 'offset' ? 'offset-pending' : 'dim-pending'}>
-          {pending.kind === 'dimension' && pending.plan.alternatives && (
-            <span className="dim-alts">
-              {[pending.plan, ...pending.plan.alternatives].map((p, i) => (
-                <button key={i} className={`btn-small ${i === dimAlt ? 'active' : ''}`} onClick={() => setDimAlt(i)}>{p.options?.along ? `d${p.options.along}` : 'dist'}</button>
-              ))}
-            </span>
-          )}
           {pending.kind === 'dimension' && pendingPlan
-            ? <ExprInput text={fmtNum(pendingPlan.value)} names={expressionNames()} autoFocus commitUnchanged testId="dim-pending-input" onCommit={commitPending} onCancel={() => setPending(null)} />
+            ? <ExprInput text={fmtNum(pendingPlan.value)} names={expressionNames()} autoFocus commitUnchanged commitOnBlur testId="dim-pending-input" onCommit={commitPending} onCancel={() => { setPending(null); toggleSketchSelect(null, false); }} />
             : <><span className="dim-kind">offset </span><ExprInput text={offsetDistance} names={expressionNames()} autoFocus commitUnchanged testId="offset-pending-input" onCommit={commitPending} onCancel={() => { setPending(null); setSketchTool(null); }} /></>}
         </div>
       )}
     </>
   );
-}
-
-function loadPlacements(key: string): Placements {
-  try { const raw = localStorage.getItem(key); return raw ? (JSON.parse(raw) as Placements) : {}; } catch { return {}; }
 }
 
 function distToLine(p: Pt, a: Pt, b: Pt): number {

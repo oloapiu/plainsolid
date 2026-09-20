@@ -5,7 +5,7 @@ import { edit } from './documents';
 import { fetchGhost } from './geometry';
 import { featureByName, featurePreviews, nextName, selectorTarget, setStatus, setUpto } from './tools';
 import type { EditOp, Feature, JsonValue, PickedEntity, PlaneInfo, SketchSolution, Tree } from '../api/types';
-import type { DimensionPlan } from '../sketch/model';
+import type { DimLock } from '../sketch/model';
 import type { SketchMode, SketchTool } from './core';
 
 // ---- sketch mode -------------------------------------------------------------
@@ -59,7 +59,7 @@ export function enterSketch(feature: Feature) {
   const offset = Number(feature.args.offset ?? 0);
   set({
     sketchMode: { sketch: feature.name, plane, offset, frame, construction: false, tool: null, selection: [], bodySelection: [], hover: null, highlight: [], preview: null,
-                  dragging: null, locked: false, solveMs: null, dimPlacing: null, dimEditing: null },
+                  dragging: null, locked: false, solveMs: null, dimLock: null, dimEditing: null },
     selected: feature.name, selectedFace: null, tool: 'none', planeDialog: null, featureDialog: null, dialogPicks: [], pickRequest: null,
     orthoBeforeSketch: state.ortho, ortho: true, ghostMesh: null,
   });
@@ -77,7 +77,7 @@ export function setSketchTool(tool: SketchTool) {
   if (!state.sketchMode) return;
   const next = state.sketchMode.tool === tool ? null : tool;
   // dimension and offset act on the selection; drawing tools start from a clean slate
-  patchSketch({ tool: next, dimPlacing: null, hover: null, ...(next === 'dimension' || next === 'offset' ? {} : { selection: next ? [] : state.sketchMode.selection }) });
+  patchSketch({ tool: next, dimLock: null, hover: null, ...(next === 'dimension' || next === 'offset' ? {} : { selection: next ? [] : state.sketchMode.selection }) });
 }
 
 export function exitSketch() {
@@ -87,7 +87,7 @@ export function exitSketch() {
   if (state.upto) setUpto(null);
 }
 
-export function setSketchSelection(selection: string[]) { patchSketch({ selection, dimPlacing: null }); }
+export function setSketchSelection(selection: string[]) { patchSketch({ selection, dimLock: null }); }
 
 /** Sketch mode: a plain click on the body selects a face, edge or vertex for conversion. */
 export function toggleBodySelect(entity: PickedEntity | null, additive: boolean) {
@@ -96,7 +96,7 @@ export function toggleBodySelect(entity: PickedEntity | null, additive: boolean)
   if (!entity) { if (sm.bodySelection.length) patchSketch({ bodySelection: [] }); return; }
   const has = sm.bodySelection.some((e) => e.kind === entity.kind && e.id === entity.id);
   const next = additive ? (has ? sm.bodySelection.filter((e) => !(e.kind === entity.kind && e.id === entity.id)) : [...sm.bodySelection, entity]) : has && sm.bodySelection.length === 1 ? [] : [entity];
-  patchSketch({ bodySelection: next, selection: additive ? sm.selection : [], dimPlacing: null });
+  patchSketch({ bodySelection: next, selection: additive ? sm.selection : [], dimLock: null });
 }
 
 /** Convert the selected body entities into sketch geometry that follows the body (a face gives its outline). */
@@ -151,10 +151,10 @@ export async function toggleConstructionSelection(): Promise<boolean> {
 export function toggleSketchSelect(ref: string | null, additive: boolean) {
   const sm = state.sketchMode;
   if (!sm) return;
-  if (ref === null) { patchSketch({ selection: [], dimPlacing: null }); return; }
-  if (!additive) { patchSketch({ selection: sm.selection.length === 1 && sm.selection[0] === ref ? [] : [ref], dimPlacing: null }); return; }
+  if (ref === null) { patchSketch({ selection: [], dimLock: null }); return; }
+  if (!additive) { patchSketch({ selection: sm.selection.length === 1 && sm.selection[0] === ref ? [] : [ref], dimLock: null }); return; }
   const selection = sm.selection.includes(ref) ? sm.selection.filter((r) => r !== ref) : [...sm.selection, ref].slice(-3);
-  patchSketch({ selection, dimPlacing: null });
+  patchSketch({ selection, dimLock: null });
 }
 
 export function setSketchHover(ref: string | null) {
@@ -167,7 +167,17 @@ export function setSketchHighlight(refs: string[]) {
 }
 
 export function setDimEditing(name: string | null) { patchSketch({ dimEditing: name }); }
-export function beginDimension(plan: DimensionPlan | null) { patchSketch({ dimPlacing: plan, tool: plan ? 'dimension' : null }); }
+/** The dimension tool: on until stopped, it dimensions the selection (its picks) and stays on after each placement. */
+export function startDimension() { patchSketch({ tool: 'dimension', dimLock: null, hover: null }); }
+export function setDimLock(lock: DimLock) { patchSketch({ dimLock: lock }); }
+
+/** Move a dimension's label: the at= keyword on its statement, one undo step. */
+export async function placeDimensionLabel(name: string, p: [number, number]) {
+  const sm = state.sketchMode;
+  if (!sm) return;
+  const at = [Math.round(p[0] * 10) / 10, Math.round(p[1] * 10) / 10];
+  if (await edit({ op: 'set_constraint_argument', sketch: sm.sketch, constraint: name, kwarg: 'at', value: at })) setStatus(`placed ${name}`);
+}
 
 export function sketchNames(): string[] {
   const f = featureByName(state.sketchMode?.sketch ?? null);
@@ -192,7 +202,7 @@ export async function addConstraint(kind: string, refs: string[], options?: Reco
   if (options && Object.keys(options).length) op.options = options;
   if (value !== undefined) op.value = value;
   const ok = await edit(op);
-  if (ok) { setStatus(`added ${kind} ${name}`); patchSketch({ selection: [], dimPlacing: null, tool: sm.tool === 'dimension' ? null : sm.tool }); }
+  if (ok) { setStatus(`added ${kind} ${name}`); patchSketch({ selection: [], dimLock: null }); }  // the dimension tool stays on for the next one
   return ok ? name : null;
 }
 

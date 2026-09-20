@@ -120,6 +120,9 @@ KIND_DEFAULTS = {
     ("view", "hidden"): ("None",), ("view", "scale"): ("None",), ("view", "section"): ("None",),
     ("dimension", "kind"): ("None",), ("dimension", "along"): ("None",), ("dimension", "text"): ("None",),
     ("note", "size"): ("3.5",), ("note", "view"): ("None",),
+    # sketch dimensions: the label's place and the distance/angle options
+    **{(k, "at"): ("None",) for k in ("distance", "length", "diameter", "radius", "angle")},
+    ("distance", "along"): ("None",), ("angle", "reverse"): ("False",),
 }
 
 
@@ -979,6 +982,8 @@ def apply(src: str, op: dict[str, Any]) -> str:
             return delete_sketch_entity(src, op["sketch"], op["constraint"])
         if kind == "set_constraint_value":
             return set_entity_argument(src, op["sketch"], op["constraint"], "value", _lit(op["value"]))
+        if kind == "set_constraint_argument":
+            return set_entity_argument(src, op["sketch"], op["constraint"], op["kwarg"], _lit(op["value"]))
         if kind == "write_back":
             return write_back(src, op["sketch"], op["coords"], int(op.get("precision", 4)))
         if kind == "write_poses":

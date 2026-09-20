@@ -252,45 +252,60 @@ export function validConstraints(m: SketchModel, sel: string[]): ConstraintChoic
   return [];
 }
 
-export interface DimensionPlan { kind: string; refs: string[]; value: number; options?: Record<string, JsonValue>; alternatives?: DimensionPlan[] }
+export interface DimensionPlan { kind: string; refs: string[]; value: number; options?: Record<string, JsonValue> }
+export type DimLock = 'x' | 'y' | 'aligned' | null;
 
-export function dimensionFor(m: SketchModel, sel: string[]): DimensionPlan | null {
+/** How a distance between two points is measured, from where the cursor is: above or below the
+ * pair gives the horizontal component, left or right of it the vertical one, the diagonal zones
+ * the true distance. Null when the pair is already horizontal or vertical. */
+export function orientationFor(a: Pt, b: Pt, cursor: Pt): 'x' | 'y' | null {
+  const minx = Math.min(a[0], b[0]), maxx = Math.max(a[0], b[0]), miny = Math.min(a[1], b[1]), maxy = Math.max(a[1], b[1]);
+  if (maxx - minx < 1e-6 || maxy - miny < 1e-6) return null;
+  const inX = cursor[0] >= minx && cursor[0] <= maxx, inY = cursor[1] >= miny && cursor[1] <= maxy;
+  if (inX && !inY) return 'x';
+  if (inY && !inX) return 'y';
+  return null;
+}
+
+/** The centre handle of a circle or arc curve: the handle of the same entity sitting at its centre. */
+export function centerRef(m: SketchModel, ref: string): string | null {
+  const c = curveOf(m, ref);
+  if (!c || c.kind === 'line') return null;
+  return m.handles.find((h) => h.entity === c.entity && Math.hypot(h.p[0] - c.c[0], h.p[1] - c.c[1]) < 1e-6)?.ref ?? null;
+}
+
+/** The dimension a selection takes. With a cursor, the placement decides what a pair of points
+ * measures and which sector of two lines the angle is in; a lock from the menu overrides the cursor. */
+export function dimensionFor(m: SketchModel, sel: string[], cursor?: Pt, lock: DimLock = null): DimensionPlan | null {
   const kinds = sel.map((r) => refKind(m, r));
   if (kinds.some((k) => k === null) || sel.length === 0 || sel.length > 2) return null;
   if (sel.length === 1) {
     const c = curveOf(m, sel[0]);
     const info = c ? m.entities.get(c.entity) : undefined;
-    let own: DimensionPlan | null = null;
-    if (kinds[0] === 'line' && c && c.kind === 'line') own = { kind: 'length', refs: sel, value: Math.hypot(c.b[0] - c.a[0], c.b[1] - c.a[1]) };
+    // a side of a rect or a slot: the macro's own size
+    if (c && info && (info.kind === 'slot' || info.kind === 'rect')) {
+      const n = c.entity, part = sel[0].slice(n.length + 1);
+      const len = (ref: string) => { const l = curveOf(m, ref); return l && l.kind === 'line' ? Math.hypot(l.b[0] - l.a[0], l.b[1] - l.a[1]) : 0; };
+      if (info.kind === 'rect') return part === 'left' || part === 'right' ? { kind: 'length', refs: [`${n}.height`], value: len(`${n}.left`) } : { kind: 'length', refs: [`${n}.width`], value: len(`${n}.top`) };
+      const arc = curveOf(m, `${n}.start_arc`);
+      const w = arc && arc.kind !== 'line' ? 2 * arc.r : 0;
+      return part === 'axis' ? { kind: 'length', refs: [`${n}.length`], value: len(`${n}.axis`) + w } : { kind: 'length', refs: [`${n}.width`], value: w };
+    }
+    if (kinds[0] === 'line' && c && c.kind === 'line') return { kind: 'length', refs: sel, value: Math.hypot(c.b[0] - c.a[0], c.b[1] - c.a[1]) };
     if (kinds[0] === 'circle' && c && c.kind !== 'line') {
       const arc = c.kind === 'arc' || info?.kind === 'arc';
-      own = arc ? { kind: 'radius', refs: sel, value: c.r } : { kind: 'diameter', refs: sel, value: 2 * c.r };
+      return arc ? { kind: 'radius', refs: sel, value: c.r } : { kind: 'diameter', refs: sel, value: 2 * c.r };
     }
-    // a curve of a slot or a rect: the macro's own sizes come first, the curve's dimension stays as an alternative
-    if (c && info && (info.kind === 'slot' || info.kind === 'rect')) {
-      const n = c.entity;
-      const len = (ref: string) => { const l = curveOf(m, ref); return l && l.kind === 'line' ? Math.hypot(l.b[0] - l.a[0], l.b[1] - l.a[1]) : 0; };
-      let sizes: DimensionPlan[];
-      if (info.kind === 'slot') {
-        const arc = curveOf(m, `${n}.start_arc`);
-        const w = arc && arc.kind !== 'line' ? 2 * arc.r : 0;
-        sizes = [{ kind: 'length', refs: [`${n}.length`], value: len(`${n}.axis`) + w }, { kind: 'length', refs: [`${n}.width`], value: w }];
-      } else {
-        sizes = [{ kind: 'length', refs: [`${n}.width`], value: len(`${n}.top`) }, { kind: 'length', refs: [`${n}.height`], value: len(`${n}.left`) }];
-      }
-      return { ...sizes[0], alternatives: [sizes[1], ...(own ? [own] : [])] };
-    }
-    return own;
+    return null;
   }
   const key = [...kinds].sort().join('+');
-  if (key === 'point+point') {
-    const a = handleAt(m, sel[0])!, b = handleAt(m, sel[1])!;
-    const d = Math.hypot(b[0] - a[0], b[1] - a[1]);
-    return { kind: 'distance', refs: sel, value: d, alternatives: [
-      { kind: 'distance', refs: sel, value: Math.abs(b[0] - a[0]), options: { along: 'x' } },
-      { kind: 'distance', refs: sel, value: Math.abs(b[1] - a[1]), options: { along: 'y' } },
-    ] };
-  }
+  const pointPair = (pa: string, pb: string, refs: string[]): DimensionPlan => {
+    const a = handleAt(m, pa)!, b = handleAt(m, pb)!;
+    const along = lock === 'aligned' ? null : lock ?? (cursor ? orientationFor(a, b, cursor) : null);
+    const value = along === 'x' ? Math.abs(b[0] - a[0]) : along === 'y' ? Math.abs(b[1] - a[1]) : Math.hypot(b[0] - a[0], b[1] - a[1]);
+    return along ? { kind: 'distance', refs, value, options: { along } } : { kind: 'distance', refs, value };
+  };
+  if (key === 'point+point') return pointPair(sel[0], sel[1], sel);
   if (key === 'line+point') {
     const p = sel[kinds[0] === 'point' ? 0 : 1], l = sel[kinds[0] === 'line' ? 0 : 1];
     const c = curveOf(m, l);
@@ -302,9 +317,38 @@ export function dimensionFor(m: SketchModel, sel: string[]): DimensionPlan | nul
     if (!a || !b || a.kind !== 'line' || b.kind !== 'line') return null;
     const ang = angleBetween(a, b);
     if (Math.abs(ang) < 0.5 || Math.abs(Math.abs(ang) - 180) < 0.5) return { kind: 'distance', refs: sel, value: distToLine(b.a, a.a, a.b) };
-    return { kind: 'angle', refs: sel, value: ang };
+    // the sector the cursor sits in: the same side of both lines' directions, or against the second one's
+    let reverse = false;
+    if (cursor) {
+      const x = intersect(a.a, a.b, b.a, b.b) ?? mid(mid(a.a, a.b), mid(b.a, b.b));
+      const s1 = (cursor[0] - x[0]) * (a.b[0] - a.a[0]) + (cursor[1] - x[1]) * (a.b[1] - a.a[1]) >= 0;
+      const s2 = (cursor[0] - x[0]) * (b.b[0] - b.a[0]) + (cursor[1] - x[1]) * (b.b[1] - b.a[1]) >= 0;
+      reverse = s1 !== s2;
+    }
+    const value = reverse ? 180 - Math.abs(ang) : Math.abs(ang);
+    return reverse ? { kind: 'angle', refs: sel, value, options: { reverse: true } } : { kind: 'angle', refs: sel, value };
+  }
+  // circles measure from their centres
+  if (key === 'circle+circle') {
+    const ca = centerRef(m, sel[0]), cb = centerRef(m, sel[1]);
+    return ca && cb ? pointPair(ca, cb, [ca, cb]) : null;
+  }
+  if (key === 'circle+point') {
+    const p = sel[kinds[0] === 'point' ? 0 : 1], c = centerRef(m, sel[kinds[0] === 'circle' ? 0 : 1]);
+    return c ? pointPair(p, c, [p, c]) : null;
+  }
+  if (key === 'circle+line') {
+    const l = sel[kinds[0] === 'line' ? 0 : 1], c = centerRef(m, sel[kinds[0] === 'circle' ? 0 : 1]);
+    const line = curveOf(m, l);
+    if (!c || !line || line.kind !== 'line') return null;
+    return { kind: 'distance', refs: [c, l], value: distToLine(handleAt(m, c)!, line.a, line.b) };
   }
   return null;
+}
+
+/** The text of a dimension's label. */
+export function dimText(kind: string, value: number): string {
+  return kind === 'diameter' ? `Ø${fmtNum(value)}` : kind === 'radius' ? `R${fmtNum(value)}` : kind === 'angle' ? `${fmtNum(value)}°` : fmtNum(value);
 }
 
 function distToLine(p: Pt, a: Pt, b: Pt): number {
@@ -315,6 +359,124 @@ function distToLine(p: Pt, a: Pt, b: Pt): number {
 function angleBetween(a: { a: Pt; b: Pt }, b: { a: Pt; b: Pt }): number {
   const d1 = [a.b[0] - a.a[0], a.b[1] - a.a[1]], d2 = [b.b[0] - b.a[0], b.b[1] - b.a[1]];
   return (Math.atan2(d1[0] * d2[1] - d1[1] * d2[0], d1[0] * d2[0] + d1[1] * d2[1]) * 180) / Math.PI;
+}
+
+// ---- dimension drawing: extension lines, a dimension line through the label, arrowheads --------
+
+/** Polylines and arrowheads of a dimension, and where its text sits, all in sketch units. */
+export interface DimensionDrawing { lines: Pt[][]; arrows: { tip: Pt; dir: Pt }[]; text: Pt }
+
+/** The measured span of a dimension: the two points it runs between, or the circle, or the lines of an angle. */
+function span(m: SketchModel, kind: string, refs: string[]): { a: Pt; b: Pt } | null {
+  if (kind === 'length') {
+    const line = curveOf(m, refs[0]);
+    return line && line.kind === 'line' ? { a: line.a, b: line.b } : null;
+  }
+  if (kind !== 'distance') return null;
+  const ka = refKind(m, refs[0]), kb = refKind(m, refs[1]);
+  if (ka === 'point' && kb === 'point') return { a: handleAt(m, refs[0])!, b: handleAt(m, refs[1])! };
+  if (ka === 'line' && kb === 'line') {
+    const line = curveOf(m, refs[0]), other = curveOf(m, refs[1]);
+    if (!line || !other || line.kind !== 'line' || other.kind !== 'line') return null;
+    const a = mid(line.a, line.b);
+    return { a, b: footOnLine(a, other.a, other.b) };
+  }
+  const p = refs[ka === 'point' ? 0 : 1], l = refs[ka === 'line' ? 0 : 1];
+  const line = curveOf(m, l), pp = handleAt(m, p);
+  if (!line || line.kind !== 'line' || !pp) return null;
+  return { a: pp, b: footOnLine(pp, line.a, line.b) };
+}
+
+/** A linear dimension between P and Q: the dimension line runs through the label, parallel to PQ,
+ * extension lines reach it from P and Q, and the text sits on it under the label. */
+function linear(P: Pt, Q: Pt, label: Pt, px: number): DimensionDrawing | null {
+  const dx = Q[0] - P[0], dy = Q[1] - P[1], L = Math.hypot(dx, dy);
+  if (L < 1e-9) return null;
+  const u: Pt = [dx / L, dy / L], n: Pt = [-u[1], u[0]];
+  const d = (label[0] - P[0]) * n[0] + (label[1] - P[1]) * n[1];
+  const t = (label[0] - P[0]) * u[0] + (label[1] - P[1]) * u[1];
+  const s = d >= 0 ? 1 : -1, gap = 2.5 * px * s, over = 6 * px * s;
+  const at = (p: Pt, along: number, off: number): Pt => [p[0] + u[0] * along + n[0] * off, p[1] + u[1] * along + n[1] * off];
+  const A = at(P, 0, d), B = at(P, L, d);
+  const lines: Pt[][] = [[at(P, 0, gap), at(P, 0, d + over)], [at(P, L, gap), at(P, L, d + over)], [at(P, Math.min(0, t), d), at(P, Math.max(L, t), d)]];
+  return { lines, arrows: [{ tip: A, dir: [-u[0], -u[1]] }, { tip: B, dir: u }], text: at(P, t, d) };
+}
+
+export function dimensionDrawing(m: SketchModel, kind: string, refs: string[], options: Record<string, unknown> | undefined, label: Pt, px: number): DimensionDrawing | null {
+  if (kind === 'length' || kind === 'distance') {
+    const sp = span(m, kind, refs);
+    if (!sp) return null;
+    const along = options?.along;
+    const b: Pt = along === 'x' ? [sp.b[0], sp.a[1]] : along === 'y' ? [sp.a[0], sp.b[1]] : sp.b;
+    return linear(sp.a, b, label, px);
+  }
+  if (kind === 'diameter' || kind === 'radius') {
+    const c = curveOf(m, refs[0]);
+    if (!c || c.kind === 'line') return null;
+    const dl = Math.hypot(label[0] - c.c[0], label[1] - c.c[1]);
+    const w: Pt = dl > 1e-9 ? [(label[0] - c.c[0]) / dl, (label[1] - c.c[1]) / dl] : [Math.SQRT1_2, Math.SQRT1_2];
+    const rim: Pt = [c.c[0] + c.r * w[0], c.c[1] + c.r * w[1]];
+    const far: Pt = dl > c.r ? label : rim;
+    if (kind === 'radius') return { lines: [[c.c, far]], arrows: [{ tip: rim, dir: w }], text: label };
+    const opp: Pt = [c.c[0] - c.r * w[0], c.c[1] - c.r * w[1]];
+    return { lines: [[opp, far]], arrows: [{ tip: rim, dir: w }, { tip: opp, dir: [-w[0], -w[1]] }], text: label };
+  }
+  if (kind === 'angle') {
+    const a = curveOf(m, refs[0]), b = curveOf(m, refs[1]);
+    if (!a || !b || a.kind !== 'line' || b.kind !== 'line') return null;
+    const x = intersect(a.a, a.b, b.a, b.b) ?? mid(mid(a.a, a.b), mid(b.a, b.b));
+    const unit = (l: { a: Pt; b: Pt }): Pt => { const dx = l.b[0] - l.a[0], dy = l.b[1] - l.a[1], n = Math.hypot(dx, dy) || 1; return [dx / n, dy / n]; };
+    const d1 = unit(a), d2 = unit(b);
+    // the sector: the label's side of the first line's direction, and the same or the opposite side of the second's
+    const s1 = (label[0] - x[0]) * d1[0] + (label[1] - x[1]) * d1[1] >= 0 ? 1 : -1;
+    const s2 = options?.reverse ? -s1 : s1;
+    const r1: Pt = [s1 * d1[0], s1 * d1[1]], r2: Pt = [s2 * d2[0], s2 * d2[1]];
+    const R = Math.max(Math.hypot(label[0] - x[0], label[1] - x[1]), 4 * px);
+    let a0 = Math.atan2(r1[1], r1[0]), a1 = Math.atan2(r2[1], r2[0]);
+    let sw = a1 - a0;
+    while (sw > Math.PI) sw -= 2 * Math.PI;
+    while (sw < -Math.PI) sw += 2 * Math.PI;
+    if (sw < 0) { [a0, a1] = [a1, a0]; sw = -sw; }
+    const steps = Math.max(6, Math.ceil(sw / 0.1));
+    const arc: Pt[] = [];
+    for (let i = 0; i <= steps; i++) { const t = a0 + (sw * i) / steps; arc.push([x[0] + R * Math.cos(t), x[1] + R * Math.sin(t)]); }
+    const over = 6 * px;
+    const ray = (r: Pt): Pt[] => [x, [x[0] + r[0] * (R + over), x[1] + r[1] * (R + over)]];
+    const tang = (t: number, sign: number): Pt => [-Math.sin(t) * sign, Math.cos(t) * sign];
+    return { lines: [arc, ray(r1), ray(r2)], arrows: [{ tip: arc[0], dir: tang(a0, -1) }, { tip: arc[arc.length - 1], dir: tang(a1, 1) }], text: label };
+  }
+  return null;
+}
+
+/** Where a dimension's label goes when the file does not say: beside its span. */
+export function defaultLabel(m: SketchModel, c: Constraint): Pt | null {
+  const k = c.kind;
+  if (k === 'length' || k === 'distance') {
+    const sp = span(m, k, c.refs);
+    if (!sp) return null;
+    const along = c.options?.along;
+    const b: Pt = along === 'x' ? [sp.b[0], sp.a[1]] : along === 'y' ? [sp.a[0], sp.b[1]] : sp.b;
+    return offsetFrom(sp.a, b, 6);
+  }
+  if (k === 'diameter' || k === 'radius') {
+    const c0 = curveOf(m, c.refs[0]);
+    if (!c0 || c0.kind === 'line') return null;
+    const ang = c0.kind === 'arc' ? midAngle(c0.a0, c0.a1) : Math.PI / 4;
+    return [c0.c[0] + (c0.r + 4) * Math.cos(ang), c0.c[1] + (c0.r + 4) * Math.sin(ang)];
+  }
+  if (k === 'angle') {
+    const a = curveOf(m, c.refs[0]), b = curveOf(m, c.refs[1]);
+    if (!a || !b || a.kind !== 'line' || b.kind !== 'line') return null;
+    return mid(mid(a.a, a.b), mid(b.a, b.b));
+  }
+  return null;
+}
+
+/** The label position of a dimension: the file's at=, else the default. */
+export function labelOf(m: SketchModel, c: Constraint): Pt | null {
+  const at = c.options?.at;
+  if (Array.isArray(at) && at.length === 2 && typeof at[0] === 'number' && typeof at[1] === 'number') return [at[0], at[1]];
+  return defaultLabel(m, c);
 }
 
 export const CONSTRAINT_PREFIX: Record<string, string> = {
@@ -331,51 +493,6 @@ export const GLYPH: Record<string, string> = {
 /** Every name already used in the sketch: entities and constraints share one namespace. */
 export function takenNames(f: Feature): string[] {
   return [...f.entities.map((e) => e.name), ...(f.constraints ?? []).map((c) => c.name)];
-}
-
-/** Where a dimension's measured span lies: two anchor points and a default label offset. */
-export function dimensionGeometry(m: SketchModel, c: Constraint): { a: Pt; b: Pt; label: Pt } | null {
-  const k = c.kind;
-  if (k === 'length' || (k === 'distance' && c.refs.length === 2 && refKind(m, c.refs[0]) === 'line' && refKind(m, c.refs[1]) === 'line')) {
-    const line = curveOf(m, c.refs[0]);
-    if (!line || line.kind !== 'line') return null;
-    if (k === 'distance') {
-      const other = curveOf(m, c.refs[1]);
-      if (!other || other.kind !== 'line') return null;
-      const a = mid(line.a, line.b), b = footOnLine(a, other.a, other.b);
-      return { a, b, label: mid(a, b) };
-    }
-    return { a: line.a, b: line.b, label: offsetFrom(line.a, line.b, 6) };
-  }
-  if (k === 'diameter' || k === 'radius') {
-    const c0 = curveOf(m, c.refs[0]);
-    if (!c0 || c0.kind === 'line') return null;
-    const ang = c0.kind === 'arc' ? midAngle(c0.a0, c0.a1) : Math.PI / 4;
-    const rim: Pt = [c0.c[0] + c0.r * Math.cos(ang), c0.c[1] + c0.r * Math.sin(ang)];
-    const start: Pt = k === 'diameter' ? [c0.c[0] - c0.r * Math.cos(ang), c0.c[1] - c0.r * Math.sin(ang)] : c0.c;
-    return { a: start, b: rim, label: [rim[0] + 4 * Math.cos(ang), rim[1] + 4 * Math.sin(ang)] };
-  }
-  if (k === 'distance') {
-    const ka = refKind(m, c.refs[0]), kb = refKind(m, c.refs[1]);
-    if (ka === 'point' && kb === 'point') {
-      const a = handleAt(m, c.refs[0])!, b = handleAt(m, c.refs[1])!;
-      const along = c.options?.along;
-      const bb: Pt = along === 'x' ? [b[0], a[1]] : along === 'y' ? [a[0], b[1]] : b;
-      return { a, b: bb, label: offsetFrom(a, bb, 5) };
-    }
-    const p = c.refs[ka === 'point' ? 0 : 1], l = c.refs[ka === 'line' ? 0 : 1];
-    const line = curveOf(m, l), pp = handleAt(m, p);
-    if (!line || line.kind !== 'line' || !pp) return null;
-    const foot = footOnLine(pp, line.a, line.b);
-    return { a: pp, b: foot, label: mid(pp, foot) };
-  }
-  if (k === 'angle') {
-    const a = curveOf(m, c.refs[0]), b = curveOf(m, c.refs[1]);
-    if (!a || !b || a.kind !== 'line' || b.kind !== 'line') return null;
-    const x = intersect(a.a, a.b, b.a, b.b) ?? mid(mid(a.a, a.b), mid(b.a, b.b));
-    return { a: x, b: mid(a.a, a.b), label: mid(mid(a.a, a.b), mid(b.a, b.b)) };
-  }
-  return null;
 }
 
 export const mid = (a: Pt, b: Pt): Pt => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];

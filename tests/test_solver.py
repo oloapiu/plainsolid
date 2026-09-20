@@ -167,3 +167,23 @@ def test_reference_errors_are_clear():
         solve_sketch(feature(RECT + 's.parallel("bad", "c", "b")\n'))
     with pytest.raises(S.SketchError, match="two lines or two circles"):
         solve_sketch(feature(RECT + 's.equal("bad", "c", "b")\n'))
+
+
+@pytest.mark.solver
+def test_angle_is_unsigned_and_reverse_measures_the_supplementary_sector():
+    """L3: an angle dimension holds the angle between the lines' directions (0 to 180), and
+    reverse=True the angle against the second line's opposite direction, so a dimension placed
+    in either sector of a V keeps the V where it is; the Jacobians agree with finite differences."""
+    v = 's = sketch("s", on=XY)\ns.line("l1", (0, 0), (10, 0))\ns.line("l2", (8.6603, 5), (0, 0))\ns.coincident("c", "l1.start", "l2.end")\ns.fix("f", "l1")\n'
+    # l2 runs back into the vertex: the directed angle from l1 to l2 is -150, the unsigned one 150
+    sol = solve_sketch(feature(v + 's.angle("a", "l1", "l2", 150)\n'))
+    assert sol.residual < 1e-9 and not sol.conflicting and sol.coords["l2"]["start"] == pytest.approx((8.6603, 5), abs=1e-3)
+    # the supplementary sector: 30 against l2's opposite direction
+    sol = solve_sketch(feature(v + 's.angle("a", "l1", "l2", 30, reverse=True)\n'))
+    assert sol.residual < 1e-9 and not sol.conflicting and sol.coords["l2"]["start"] == pytest.approx((8.6603, 5), abs=1e-3)
+    # a different value turns l2 about the vertex (its length is free, so the nearest solution shortens it)
+    sol = solve_sketch(feature(v + 's.angle("a", "l1", "l2", 90, reverse=True)\n'))
+    assert sol.residual < 1e-9 and sol.coords["l2"]["start"][0] == pytest.approx(0, abs=1e-4) and sol.coords["l2"]["start"][1] > 1
+    for tail in ('s.angle("a", "l1", "l2", 150)\n', 's.angle("a", "l1", "l2", 30, reverse=True)\n'):
+        lay = build(feature(v + tail))
+        assert S.check_jacobians(lay.system, lay.system.initial()) < 1e-6

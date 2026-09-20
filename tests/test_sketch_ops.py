@@ -120,3 +120,25 @@ def test_setting_a_flag_back_to_its_default_drops_the_keyword():
     src = 'from plainsolid import *\ns = sketch("s", on=XY)\ns.rect("r", 1, 1)\ne = extrude("e", s, 5, flip=True)\n'
     assert edit.apply(src, {"op": "set_argument", "feature": "e", "kwarg": "flip", "value": False}).endswith('e = extrude("e", s, 5)\n')
     assert edit.apply(src, {"op": "set_argument", "feature": "e", "kwarg": "draft", "value": 0}) == src
+
+
+@pytest.mark.roundtrip
+def test_dimension_placement_and_options_are_keywords_on_the_statement():
+    """A dimension's label place is an at= keyword written by the GUI, set or dropped through
+    set_constraint_argument, and read back as an option; angle takes reverse= the same way."""
+    n = edit.apply(SRC, {"op": "add_constraint", "sketch": "s", "kind": "length", "name": "len1", "refs": ["l2"], "value": 20,
+                         "options": {"at": [50, 27]}})
+    assert changed(SRC, n) == ['+s.length("len1", "l2", 20, at=(50, 27))']
+    assert parse_document(n).feature("s").constraint("len1").options == {"at": (50.0, 27.0)}
+    moved = edit.apply(n, {"op": "set_constraint_argument", "sketch": "s", "constraint": "len1", "kwarg": "at", "value": [12.5, -3]})
+    assert changed(n, moved) == ['-s.length("len1", "l2", 20, at=(50, 27))', '+s.length("len1", "l2", 20, at=(12.5, -3))']
+    dropped = edit.apply(moved, {"op": "set_constraint_argument", "sketch": "s", "constraint": "len1", "kwarg": "at", "value": None})
+    assert changed(moved, dropped) == ['-s.length("len1", "l2", 20, at=(12.5, -3))', '+s.length("len1", "l2", 20)']
+    placed = edit.apply(SRC, {"op": "set_constraint_argument", "sketch": "s", "constraint": "width", "kwarg": "at", "value": [20, -5]})
+    assert changed(SRC, placed) == ['-s.length("width", "l1", w)', '+s.length("width", "l1", w, at=(20, -5))']
+    a = edit.apply(SRC, {"op": "add_constraint", "sketch": "s", "kind": "angle", "name": "a1", "refs": ["l1", "l2"], "value": 150,
+                         "options": {"reverse": True, "at": [30, 10]}})
+    assert changed(SRC, a) == ['+s.angle("a1", "l1", "l2", 150, reverse=True, at=(30, 10))']
+    assert parse_document(a).feature("s").constraint("a1").options == {"reverse": True, "at": (30.0, 10.0)}
+    with pytest.raises(edit.EditError):
+        edit.apply(SRC, {"op": "set_constraint_argument", "sketch": "s", "constraint": "nope", "kwarg": "at", "value": [0, 0]})

@@ -410,16 +410,35 @@ await page.waitForSelector('[data-testid=param-list]');
       && /profile\.parallel\("pa1", "bottom", "inner_bottom"\)/.test(readFile()) && sol2.redundant.includes('pa1'),
     `panel: ${bar.slice(0, 80)}, menu: ${menuText.slice(0, 120)}, keys ${menuHasKeys}, redundant ${sol2.redundant}`);
 
-  // dimension tool on the new line: length written, label shows the value
+  // the dimension tool on the new line: the pick, a preview that follows the cursor, the placement click, the value box;
+  // the length is written with where its label went, and the tool stays on
   await clickAt(50, 20); await page.keyboard.press('d'); await page.waitForTimeout(300);
+  let pm = await at(50, 27); await page.mouse.move(pm[0], pm[1]); await page.waitForTimeout(200);
+  const previewText = (await page.locator('[data-testid=snap-glyph]').textContent().catch(() => '')) ?? '';
   await clickAt(50, 27);
   await page.waitForSelector('[data-testid=dim-pending-input]', { timeout: 5000 });
   const prefill = await page.locator('[data-testid=dim-pending-input]').inputValue();
   h = (await st()).hash;
   await page.locator('[data-testid=dim-pending-input]').press('Enter'); await waitHash(h);
-  check('the dimension tool writes a length constraint and shows its label',
-    prefill === '20' && /profile\.length\("len1", "line1", 20\)/.test(readFile()) && (await page.locator('[data-testid=dim-len1]').textContent())?.startsWith('20'),
-    `prefill ${prefill}, label ${await page.locator('[data-testid=dim-len1]').textContent().catch(() => 'none')}`);
+  const toolStays = (await st()).sketchMode?.tool === 'dimension';
+  check('the dimension tool previews the length under the cursor, writes it with its label place, and stays on',
+    previewText === '20' && prefill === '20' && toolStays && /profile\.length\("len1", "line1", 20, at=\(50, 27\)\)/.test(readFile()) && (await page.locator('[data-testid=dim-len1]').textContent())?.startsWith('20'),
+    `preview ${previewText}, prefill ${prefill}, tool ${toolStays}, ${readFile().match(/profile\.length\("len1".*/)?.[0] ?? 'no statement'}`);
+
+  // two points: where the cursor places the label decides what is measured (right of the pair: the vertical distance)
+  await clickAt(-30, 0); await clickAt(-26, 62);
+  const picks = (await st()).sketchMode?.selection ?? [];
+  pm = await at(0, 30); await page.mouse.move(pm[0], pm[1]); await page.waitForTimeout(200);
+  const previewV = (await page.locator('[data-testid=snap-glyph]').textContent().catch(() => '')) ?? '';
+  await clickAt(0, 30);
+  await page.waitForSelector('[data-testid=dim-pending-input]', { timeout: 5000 });
+  h = (await st()).hash;
+  await page.locator('[data-testid=dim-pending-input]').press('Enter'); await waitHash(h);
+  await page.keyboard.press('Escape'); await page.keyboard.press('Escape'); await page.waitForTimeout(200);
+  const toolOff = (await st()).sketchMode?.tool === null;
+  check('two points placed beside the pair write the vertical distance, and escape clears the picks then stops the tool',
+    picks.length === 2 && previewV === '62' && toolOff && /profile\.distance\("d1", "(bottom\.start|outer_wall\.end)", "(inner_wall\.end|top\.start)", 62, along="y", at=\(0, 30\)\)/.test(readFile()),
+    `picks ${picks.join(',')}, preview ${previewV}, off ${toolOff}, ${readFile().match(/profile\.distance\("d1".*/)?.[0] ?? 'no statement'}`);
 
   // editing a dimension to an expression (with autocomplete available) writes the expression
   await page.locator('[data-testid=dim-len1]').click();
@@ -433,8 +452,18 @@ await page.waitForSelector('[data-testid=param-list]');
   h = (await st()).hash;
   await page.locator('[data-testid=dim-input-len1]').press('Enter'); await waitHash(h);
   check('editing a dimension to an expression autocompletes names and writes the expression',
-    suggest.includes('width') && /profile\.length\("len1", "line1", width \/ 3\)/.test(readFile()) && (await page.locator('[data-testid=dim-len1]').textContent())?.includes('width / 3'),
+    suggest.includes('width') && /profile\.length\("len1", "line1", width \/ 3, at=\(50, 27\)\)/.test(readFile()) && (await page.locator('[data-testid=dim-len1]').textContent())?.includes('width / 3'),
     `suggest ${suggest.join(',')}, ${readFile().match(/profile\.length\("len1".*/)?.[0]}`);
+
+  // dragging a label writes its new place into the file
+  const lb = await page.locator('[data-testid=dim-len1]').boundingBox();
+  await page.mouse.move(lb.x + lb.width / 2, lb.y + lb.height / 2); await page.mouse.down();
+  for (let i = 1; i <= 6; i++) { await page.mouse.move(lb.x + lb.width / 2, lb.y + lb.height / 2 + 8 * i); await page.waitForTimeout(30); }
+  h = (await st()).hash;
+  await page.mouse.up(); await waitHash(h);
+  const placedAt = readFile().match(/profile\.length\("len1", "line1", width \/ 3, at=\(([-\d.]+), ([-\d.]+)\)\)/);
+  check('dragging a dimension label writes at= on its statement', placedAt !== null && Number(placedAt[2]) < 27 && Number(placedAt[2]) > 10,
+    readFile().match(/profile\.length\("len1".*/)?.[0] ?? 'no statement');
 
   // construction geometry: toggle a profile line to construction (the profile opens, the extrude fails), then back
   await page.evaluate(() => window.__plainsolid.actions.setSketchSelection(['inner_bottom']));

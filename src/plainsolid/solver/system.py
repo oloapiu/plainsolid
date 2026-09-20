@@ -535,38 +535,44 @@ class TangentCircles(Constraint):
 
 @dataclass
 class Angle(Constraint):
-    """Angle from line 1 to line 2 in degrees, counter-clockwise."""
+    """The unsigned angle between the lines' directions, 0 to 180 degrees; with reverse
+    the second line's direction is taken the other way (the supplementary sector), which
+    is how a dimension placed in that sector keeps the geometry where it is."""
 
     name: str
     l1: LineRef
     l2: LineRef
     degrees: float
+    reverse: bool = False
 
     def _parts(self, x):
         d1 = _vsub(self.l1.b.pos(x), self.l1.a.pos(x))
         d2 = _vsub(self.l2.b.pos(x), self.l2.a.pos(x))
+        if self.reverse:
+            d2 = (-d2[0], -d2[1])
         return d1, d2, _cross(d1, d2), _dot(d1, d2)
 
     def residual(self, x):
         _, _, c, s = self._parts(x)
         ang = math.degrees(math.atan2(c, s))
-        diff = (ang - self.degrees + 180.0) % 360.0 - 180.0
-        return [diff]
+        return [abs(ang) - abs(self.degrees)]
 
     def jacobian(self, x):
         d1, d2, c, s = self._parts(x)
         den = c * c + s * s
         if den < 1e-18:
             return [{}]
-        k = math.degrees(1.0) / den
+        sign = 1.0 if math.atan2(c, s) >= 0 else -1.0  # d|theta| = sign(theta) dtheta
+        k = sign * math.degrees(1.0) / den
         # theta = atan2(c, s); dtheta = (s dc - c ds)/den
         # dc/dd1 = (d2y, -d2x); dc/dd2 = (-d1y, d1x); ds/dd1 = d2; ds/dd2 = d1
         g1 = (k * (s * d2[1] - c * d2[0]), k * (-s * d2[0] - c * d2[1]))
         g2 = (k * (-s * d1[1] - c * d1[0]), k * (s * d1[0] - c * d1[1]))
+        f = -1.0 if self.reverse else 1.0  # d2 is the line's direction negated
         row = _chain(self.l1.b, x, *g1)
         row = _add(row, _chain(self.l1.a, x, -g1[0], -g1[1]))
-        row = _add(row, _chain(self.l2.b, x, *g2))
-        row = _add(row, _chain(self.l2.a, x, -g2[0], -g2[1]))
+        row = _add(row, _chain(self.l2.b, x, f * g2[0], f * g2[1]))
+        row = _add(row, _chain(self.l2.a, x, -f * g2[0], -f * g2[1]))
         return [row]
 
 

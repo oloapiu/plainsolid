@@ -154,6 +154,15 @@ class SetConstraintValue(Operation):
     value: JsonValue
 
 
+class SetConstraintArgument(Operation):
+    """A keyword on a constraint statement: `at` (the label's place), `along`, `reverse`, `inside`."""
+    op: Literal["set_constraint_argument"]
+    sketch: str
+    constraint: str
+    kwarg: str
+    value: JsonValue
+
+
 class WriteBack(Operation):
     op: Literal["write_back"]
     sketch: str
@@ -235,6 +244,7 @@ EditOperation = Annotated[
     | AddConstraint
     | DeleteConstraint
     | SetConstraintValue
+    | SetConstraintArgument
     | WriteBack
     | WritePoses
     | SetEntityArgument

@@ -149,9 +149,11 @@ Constraints, each `s.kind("name", refs..., value)`:
 | distance | two points, a point and a line, or two parallel lines, then the value; `along="x"` or `"y"` for a sheet-axis component. The side is taken from the seed: a point stays on the side of the line it was drawn on, and with `along` the second point stays on the side of the first it started on, so draw roughly where the result should be |
 | length | a line and the value; or a size of a macro: `slot1.length` (tip to tip), `slot1.width`, `rect1.width`, `rect1.height` |
 | diameter, radius | a circle or arc and the value |
-| angle | two lines and the value in degrees |
+| angle | two lines and the value in degrees, 0 to 180, between the lines' directions; `reverse=True` measures against the second line's opposite direction (the supplementary sector), so either angle of a V can be dimensioned without moving it |
 
-Dimensions (`distance`, `length`, `diameter`, `radius`, `angle`) are named and
+Every dimension takes `at=(x, y)`, where the GUI shows its label in sketch
+coordinates; it does not affect the geometry and a dimension without one gets a
+computed place. Dimensions (`distance`, `length`, `diameter`, `radius`, `angle`) are named and
 readable as `sketch.name` in later expressions. The tree reports each sketch's
 degrees of freedom; a fully constrained sketch has `dof: 0`. Under-constrained
 sketches still build geometry from the solved coordinates.
@@ -264,9 +266,10 @@ same way (`{"expr": "body.faces.top"}`).
 | `add_sketch_entity` | `sketch`, `kind`, `name`, `args` (the positional arguments by name plus `at`, `angle`, `construction`). Or `statement` |
 | `delete_sketch_entity` | `sketch`, `entity` |
 | `set_entity_argument` | `sketch`, `entity`, `kwarg`, `value` |
-| `add_constraint` | `sketch`, `kind`, `name`, `refs` (list of reference strings), `value` for dimensions, `options` (`{"along": "x"}`, `{"inside": true}`). Or `statement` |
+| `add_constraint` | `sketch`, `kind`, `name`, `refs` (list of reference strings), `value` for dimensions, `options` (`{"along": "x"}`, `{"inside": true}`, `{"reverse": true}`, `{"at": [x, y]}`). Or `statement` |
 | `delete_constraint` | `sketch`, `constraint` |
 | `set_constraint_value` | `sketch`, `constraint`, `value` |
+| `set_constraint_argument` | `sketch`, `constraint`, `kwarg` (`at`, `along`, `reverse`, `inside`), `value` (null drops the keyword) |
 | `batch` | `ops`: a list of operations applied in order as one edit |
 | `replace_source` | `source`: the whole file |
 | `write_back`, `write_poses` | what the GUI uses to store solved coordinates and poses; every sketch and assembly edit already does this |
