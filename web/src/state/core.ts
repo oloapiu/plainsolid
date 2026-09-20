@@ -65,7 +65,7 @@ export interface AssemblyQueries { revision: string; bom: Bom | null; interferen
 
 export type DrawingTool = 'dimension' | 'note' | null;
 /** One line of a context menu; a separator has only `sep`. */
-export interface MenuEntry { label?: string; run?: () => void; disabled?: boolean; danger?: boolean; sep?: boolean; title?: string; id?: string }
+export interface MenuEntry { label?: string; run?: () => void; disabled?: boolean; danger?: boolean; sep?: boolean; title?: string; id?: string; key?: string }
 export interface ContextMenuState { x: number; y: number; title?: string; entries: MenuEntry[] }
 export type DimKind = 'auto' | 'distance' | 'diameter' | 'radius' | 'angle';
 /** An edge picked on the sheet for a dimension: the selector the server gave the segment, its view, whether it is round. */

@@ -29,7 +29,8 @@ const TOOLS: { id: SketchTool; label: string; key: string; hint: string }[] = [
 
 /** A point the cursor snapped to: a handle (coincident), a midpoint, or a point on a curve. */
 interface Snapped { p: Pt; ref: string | null; snap?: 'handle' | 'mid' | 'on' }
-interface PendingDim { plan: DimensionPlan; at: Pt }
+/** A value box waiting at a point of the plane: a dimension's value after its placement click, an offset's distance after its side click. */
+type Pending = { kind: 'dimension'; plan: DimensionPlan; at: Pt } | { kind: 'offset'; at: Pt };
 
 export function SketchOverlay() {
   const sm = useStore((s) => s.sketchMode)!;
@@ -40,12 +41,10 @@ export function SketchOverlay() {
   const [cursor, setCursor] = useState<Pt | null>(null);
   const [nPoints, setNPoints] = useState(0);
   const [tick, setTick] = useState(0);
-  const [pending, setPending] = useState<PendingDim | null>(null);
+  const [pending, setPending] = useState<Pending | null>(null);
   const [dimAlt, setDimAlt] = useState(0);
   const [snapGlyph, setSnapGlyph] = useState<{ x: number; y: number; text: string; title: string } | null>(null);
-  const [offsetDistance, setOffsetDistance] = useState('2');
-  const offsetRef = useRef('2');
-  offsetRef.current = offsetDistance;
+  const [offsetDistance, setOffsetDistance] = useState('2');  // the last distance used, offered again
   const storageKey = `plainsolid:dims:${tree?.path ?? ''}:${sm.sketch}`;
   const [placements, setPlacements] = useState<Placements>(() => loadPlacements(storageKey));
   const pointsRef = useRef<Snapped[]>([]);
@@ -55,7 +54,7 @@ export function SketchOverlay() {
   const modelRef = useRef<SketchModel | null>(null);
   const dragRef = useRef<string | null>(null);
   const chainRef = useRef<Snapped | null>(null);
-  const pendingRef = useRef<PendingDim | null>(null);
+  const pendingRef = useRef<Pending | null>(null);
   pendingRef.current = pending;
 
   const model = useMemo(() => (feature ? buildModel(feature, sm.preview) : null), [feature, sm.preview]);
@@ -120,7 +119,7 @@ export function SketchOverlay() {
     if (!scene) return;
     pointsRef.current = [];
     setNPoints(0);
-    if (sm.tool !== 'dimension') setPending(null);
+    if (sm.tool !== 'dimension' && sm.tool !== 'offset') setPending(null);
     const setPreview = (obj: THREE.Object3D | null) => {
       if (preview.current) { scene.overlay.remove(preview.current); disposeGroup(preview.current); }
       preview.current = obj;
@@ -181,6 +180,7 @@ export function SketchOverlay() {
     const names = () => sketchNames();
     const sketch = sm.sketch;
     const asConstruction = sm.construction;
+    const dashed = asConstruction;  // the rubber band draws like what it will make
     const entityOp = (kind: string, name: string, args: Record<string, JsonValue>): EditOp =>
       ({ op: 'add_sketch_entity', sketch, kind, name, args: asConstruction && kind !== 'point' ? { ...args, construction: true } : args });
     const constraintOp = (kind: string, refs: string[]): EditOp => ({ op: 'add_constraint', sketch, kind, name: nextName(CONSTRAINT_PREFIX[kind] ?? kind, [...names(), ...pendingNames]), refs });
@@ -243,18 +243,18 @@ export function SketchOverlay() {
       const s = sn.p;
       showGlyph(sn, tool === 'line' ? pts[0] : null);
       const c = pts[0].p;
-      if (tool === 'line') setPreview(polyline(frame, [c, s], COLORS.preview));
-      else if (tool === 'circle') setPreview(polyline(frame, curvePoints({ ref: '', entity: '', kind: 'circle', c, r: Math.hypot(s[0] - c[0], s[1] - c[1]) }), COLORS.preview));
+      if (tool === 'line') setPreview(polyline(frame, [c, s], COLORS.preview, dashed));
+      else if (tool === 'circle') setPreview(polyline(frame, curvePoints({ ref: '', entity: '', kind: 'circle', c, r: Math.hypot(s[0] - c[0], s[1] - c[1]) }), COLORS.preview, dashed));
       else if (tool === 'arc') {
         if (pts.length === 1) setPreview(polyline(frame, [c, s], COLORS.preview, true));
-        else { const st = pts[1].p; const r = Math.hypot(st[0] - c[0], st[1] - c[1]); setPreview(polyline(frame, curvePoints({ ref: '', entity: '', kind: 'arc', c, r, a0: Math.atan2(st[1] - c[1], st[0] - c[0]), a1: Math.atan2(s[1] - c[1], s[0] - c[0]) }), COLORS.preview)); }
+        else { const st = pts[1].p; const r = Math.hypot(st[0] - c[0], st[1] - c[1]); setPreview(polyline(frame, curvePoints({ ref: '', entity: '', kind: 'arc', c, r, a0: Math.atan2(st[1] - c[1], st[0] - c[0]), a1: Math.atan2(s[1] - c[1], s[0] - c[0]) }), COLORS.preview, dashed)); }
       }
-      else if (tool === 'rect') setPreview(polyline(frame, [c, [s[0], c[1]], s, [c[0], s[1]], c], COLORS.preview));
+      else if (tool === 'rect') setPreview(polyline(frame, [c, [s[0], c[1]], s, [c[0], s[1]], c], COLORS.preview, dashed));
       else if (tool === 'slot') {
         if (pts.length === 1) setPreview(polyline(frame, [c, s], COLORS.preview, true));
-        else { const b = pts[1].p; const w = 2 * distToLine(s, c, b); setPreview(slotPreview(frame, c, b, w)); }
+        else { const b = pts[1].p; const w = 2 * distToLine(s, c, b); setPreview(slotPreview(frame, c, b, w, dashed)); }
       }
-      else if (tool === 'polygon') setPreview(polyline(frame, [...pts.map((x) => x.p), s], COLORS.preview));
+      else if (tool === 'polygon') setPreview(polyline(frame, [...pts.map((x) => x.p), s], COLORS.preview, dashed));
     };
 
     scene.onPlaneClick = async (u, v, ev, body) => {
@@ -271,9 +271,9 @@ export function SketchOverlay() {
         if (!hit && !additive) toggleBodySelect(null, false);
         return;
       }
-      if (tool === 'offset') { void commitOffset([u, v]); return; }
+      if (tool === 'offset') { setPending({ kind: 'offset', at: [round3(u), round3(v)] }); return; }
       if (tool === 'dimension') {
-        if (sm.dimPlacing) { setPending({ plan: sm.dimPlacing, at: [round3(u), round3(v)] }); setDimAlt(0); return; }
+        if (sm.dimPlacing) { setPending({ kind: 'dimension', plan: sm.dimPlacing, at: [round3(u), round3(v)] }); setDimAlt(0); return; }
         const hit = m ? hitTest(m, [u, v], tol()) : null;
         toggleSketchSelect(hit?.ref ?? null, true);
         return;
@@ -321,27 +321,29 @@ export function SketchOverlay() {
     };
     scene.onPlaneDoubleClick = () => { if (tool === 'polygon') finishPolygon(); };
 
-    // the right-click menu: the tool's own choices first, then the entity, body geometry or sketch under the cursor
+    // the right-click menu: the tool's own choices first, then the entity, body geometry or sketch under the
+    // cursor. On an entity the sections come in a fixed order, the same as the panel's selected section:
+    // relations, dimension, edits (offset, construction), delete. Tools are listed only on empty space.
     scene.onPlaneContext = (u, v, ev, body) => {
       const m = modelRef.current;
       const out: MenuEntry[] = [];
       let title = `sketch ${sketch}`;
-      if (tool === 'line' && pointsRef.current.length) {
-        out.push(item('end the chain here', () => { reset(); chainRef.current = null; }));
-        out.push(item('undo the last point', () => { pointsRef.current.pop(); setNPoints(pointsRef.current.length); if (!pointsRef.current.length) reset(); }));
-      }
+      const toolItems = (skip: SketchTool) => TOOLS.filter((t) => t.id !== skip).map((t) => item(t.label, () => setSketchTool(t.id), { key: t.key }));
       if (tool && tool !== 'dimension' && tool !== 'project' && tool !== 'offset') {
-        out.push(item(sm.construction ? 'draw profile geometry' : 'draw construction geometry', toggleConstructionMode));
-        out.push(item('stop the tool', () => setSketchTool(null)), SEP);
-        for (const t of TOOLS) if (t.id !== tool) out.push(item(t.label, () => setSketchTool(t.id)));
+        if (tool === 'line' && pointsRef.current.length) {
+          out.push(item('end the chain here', () => { reset(); chainRef.current = null; }));
+          out.push(item('undo the last point', () => { pointsRef.current.pop(); setNPoints(pointsRef.current.length); if (!pointsRef.current.length) reset(); }));
+        }
+        out.push(item(sm.construction ? 'draw profile geometry' : 'draw construction geometry', toggleConstructionMode, { key: 'x' }));
+        out.push(item('stop the tool', () => setSketchTool(null), { key: 'esc' }), SEP, ...toolItems(tool));
         openContextMenu(ev.clientX, ev.clientY, out, `${tool} tool`);
         return;
       }
-      if (tool === 'dimension') { out.push(item('cancel the dimension', () => { setPending(null); setSketchTool(null); })); openContextMenu(ev.clientX, ev.clientY, out, 'dimension'); return; }
-      if (tool === 'offset') { out.push(item('cancel the offset', () => setSketchTool(null))); openContextMenu(ev.clientX, ev.clientY, out, 'offset'); return; }
+      if (tool === 'dimension') { out.push(item('cancel the dimension', () => { setPending(null); setSketchTool(null); }, { key: 'esc' })); openContextMenu(ev.clientX, ev.clientY, out, 'dimension'); return; }
+      if (tool === 'offset') { out.push(item('cancel the offset', () => { setPending(null); setSketchTool(null); }, { key: 'esc' })); openContextMenu(ev.clientX, ev.clientY, out, 'offset'); return; }
       if (tool === 'project') {
         if (body) out.push(item(body.kind === 'face' ? 'convert the face outline' : `convert this ${body.kind}`, () => void projectPick(body)));
-        out.push(item('stop converting', () => setSketchTool(null)));
+        out.push(item('stop converting', () => setSketchTool(null), { key: 'esc' }));
         openContextMenu(ev.clientX, ev.clientY, out, body ? `body ${body.kind} ${body.id}` : 'convert');
         return;
       }
@@ -352,22 +354,28 @@ export function SketchOverlay() {
         title = sel.join(' · ');
         for (const c of validConstraints(m, sel)) out.push(item(c.label, () => void addConstraint(c.kind, c.refs, c.options)));
         const plan = dimensionFor(m, sel);
-        if (plan) out.push(item(`dimension (${plan.kind})`, () => beginDimension(plan)));
+        if (plan) out.push(item(`dimension (${plan.kind})`, () => beginDimension(plan), { key: 'd' }));
+        const edits: MenuEntry[] = [];
+        const curves = sel.filter((r) => refKind(m, r) !== 'point' && !r.endsWith('.axis'));
+        if (curves.length) edits.push(item('offset…', () => setSketchTool('offset'), { title: 'click the side to offset to, then type the distance' }));
         const ents = [...new Set(sel.map(entityOf))].map((n) => m.entities.get(n)).filter((e) => e && !e.projected && e.kind !== 'point');
-        if (ents.length) out.push(item(ents.every((e) => e!.construction) ? 'make profile geometry' : 'make construction geometry', () => void toggleConstructionSelection()));
-        out.push(SEP, item('delete', () => void deleteSketchSelection(), { danger: true }));
+        if (ents.length) edits.push(item(ents.every((e) => e!.construction) ? 'make profile geometry' : 'make construction geometry', () => void toggleConstructionSelection()));
+        if (out.length && edits.length) out.push(SEP);
+        out.push(...edits);
+        if (out.length) out.push(SEP);
+        out.push(item('delete', () => void deleteSketchSelection(), { danger: true, key: 'del' }));
       } else if (body) {
         title = `body ${body.kind} ${body.id}`;
         out.push(item(body.kind === 'face' ? 'convert the face outline' : `convert this ${body.kind}`, () => { toggleBodySelect(body, false); void convertBodySelection(false); }));
         out.push(item('convert as construction', () => { toggleBodySelect(body, false); void convertBodySelection(true); }));
-        if (body.kind !== 'face') out.push(item('use it in a relation', () => void useBodyInRelation(body, scene.entityCenter(body))));
+        if (body.kind !== 'face') out.push(item('use it in a relation', () => void useBodyInRelation(body, scene.entityCenter(body)), { key: 'shift+click' }));
       } else {
-        for (const t of TOOLS) out.push(item(t.label, () => setSketchTool(t.id)));
-        out.push(SEP);
+        out.push(...toolItems(null), SEP);
         const f = featureByName(sketch);
         if (f?.variable) out.push(item('extrude…', () => openFeatureDialog('extrude', sketch)), item('cut…', () => openFeatureDialog('cut', sketch)));
-        out.push(item('normal to', () => scene.normalTo()), item('fit', () => scene.fit()));
-        if (getState().sketchMode?.selection.length) out.push(item('clear selection', () => toggleSketchSelect(null, false)));
+        out.push(item('offset the profile…', () => { toggleSketchSelect(null, false); setSketchTool('offset'); }, { title: 'offset every profile curve: click the side, then type the distance' }));
+        out.push(SEP, item('normal to', () => scene.normalTo(), { key: 'ctrl+0' }), item('fit', () => scene.fit(), { key: 'f' }));
+        if (getState().sketchMode?.selection.length) out.push(item('clear selection', () => toggleSketchSelect(null, false), { key: 'esc' }));
         out.push(SEP, item('exit sketch', exitSketch));
       }
       openContextMenu(ev.clientX, ev.clientY, out, title);
@@ -413,8 +421,7 @@ export function SketchOverlay() {
       if (e.key === 'Delete' || e.key === 'Backspace') { deleteSelection(); return; }
       if (e.key === 'd' && !tool) { startDimension(); return; }
       if (e.key === 'e') { setSketchTool('project'); return; }
-      if (e.key === 'X' && e.shiftKey) { toggleConstructionMode(); return; }
-      if (e.key === 'x' && !tool && sm.selection.length) { toggleConstructionSelection(); return; }
+      if (e.key === 'x') { toggleConstructionMode(); return; }  // the switch, and only the switch
       const hit = TOOLS.find((x) => x.key === e.key);
       if (hit && hit.id !== tool) setSketchTool(hit.id);
     };
@@ -448,13 +455,14 @@ export function SketchOverlay() {
     if (ok) setStatus(`converted ${ent.kind} ${ent.id} as ${name}${sm.construction ? ' (construction)' : ''} · pick more or esc`);
   };
 
-  /** Offset entities: the selected curves (or the whole profile when nothing is selected) at the
-   * distance in the bar, on the side that was clicked. */
-  const commitOffset = async (click: Pt) => {
+  /** Offset entities: the selected curves (or the whole profile when nothing is selected) by the
+   * distance typed in the value box, on the side that was clicked. */
+  const commitOffset = async (click: Pt, text: string) => {
     const m = modelRef.current;
     if (!m || !feature) return;
-    const value = expressionValue(offsetRef.current);
+    const value = expressionValue(text);
     if (value === null) { setError('offset: give a distance'); return; }
+    setOffsetDistance(text);
     const picked = [...new Set(sm.selection.filter((r) => refKind(m, r) !== 'point' && !r.endsWith('.axis')))];
     const refs = picked.length ? picked
       : feature.entities.filter((e) => !e.construction && e.kind !== 'point').map((e) => e.name);
@@ -485,6 +493,7 @@ export function SketchOverlay() {
 
   const commitPending = async (text: string) => {
     if (!pending) return;
+    if (pending.kind === 'offset') { setPending(null); await commitOffset(pending.at, text); return; }
     const plan = dimAlt > 0 && pending.plan.alternatives ? pending.plan.alternatives[dimAlt - 1] : pending.plan;
     const value = expressionValue(text);
     if (value === null) return;
@@ -502,14 +511,10 @@ export function SketchOverlay() {
   const tool = TOOLS.find((t) => t.id === sm.tool);
   const sol = model?.solution ?? null;
   const dofText = sol ? (sol.fully_constrained ? 'fully constrained' : `${sol.dof} degree${sol.dof === 1 ? '' : 's'} of freedom`) : feature?.result?.error ? 'sketch failed' : '';
-  const choices = model && !sm.tool ? validConstraints(model, sm.selection) : [];
-  const dimPlan = model && !sm.tool ? dimensionFor(model, sm.selection) : null;
   const pendingScreen = pending && scene && frame ? scene.toScreen(toWorld(frame, pending.at)) : null;
-  const pendingPlan = pending ? (dimAlt > 0 && pending.plan.alternatives ? pending.plan.alternatives[dimAlt - 1] : pending.plan) : null;
+  const pendingPlan = pending?.kind === 'dimension' ? (dimAlt > 0 && pending.plan.alternatives ? pending.plan.alternatives[dimAlt - 1] : pending.plan) : null;
   const hoverText = sm.tool === 'project' && hover3d ? `${hover3d.kind} ${hover3d.id} · click to convert`
     : !sm.tool && hover3d ? `body ${hover3d.kind} ${hover3d.id} · click to select it for conversion · shift+click relates an edge or vertex` : sm.hover ?? '';
-  const selectedEntities = [...new Set(sm.selection.map(entityOf))].map((n) => feature?.entities.find((e) => e.name === n)).filter((e) => e && e.kind !== 'point' && e.kind !== 'project');
-  const allConstruction = selectedEntities.length > 0 && selectedEntities.every((e) => e!.construction);
 
   return (
     <>
@@ -517,27 +522,24 @@ export function SketchOverlay() {
       <div className="sketch-bar" data-testid="sketch-bar">
         <span className="sketch-title">sketch <b>{sm.sketch}</b> on {sm.plane}</span>
         {TOOLS.map((t) => (
-          <button key={t.id} className={`btn-small ${sm.tool === t.id ? 'active' : ''}`} title={`${t.hint} (${t.key})`} onClick={() => setSketchTool(t.id)}>{t.label}</button>
+          <button key={t.id} className={`btn-small ${sm.tool === t.id ? 'active' : ''} ${sm.construction && sm.tool === t.id ? 'construction' : ''}`} title={`${t.hint} (${t.key})`} onClick={() => setSketchTool(t.id)}>{t.label}</button>
         ))}
-        <button className={`btn-small ${sm.tool === 'dimension' ? 'active' : ''}`} title="dimension the selection (d)" data-testid="sketch-dimension" onClick={() => (sm.tool === 'dimension' ? setSketchTool(null) : startDimension())}>dimension</button>
-        <button className={`btn-small ${sm.tool === 'project' ? 'active' : ''}`} title="convert body edges, vertices or a face outline into sketch geometry that follows the body (e); stays on until esc" data-testid="sketch-project" onClick={() => setSketchTool(sm.tool === 'project' ? null : 'project')}>convert</button>
-        <button className={`btn-small ${sm.tool === 'offset' ? 'active' : ''}`} title="offset the selected curves, or the whole profile, by a distance to the side you click" data-testid="sketch-offset" onClick={() => setSketchTool(sm.tool === 'offset' ? null : 'offset')}>offset</button>
-        {sm.tool === 'offset' && (
-          <input className="sketch-offset-input" value={offsetDistance} onChange={(e) => setOffsetDistance(e.target.value)} title="offset distance" data-testid="offset-distance" spellCheck={false} />
-        )}
-        <button className={`btn-small dashed ${sm.construction ? 'active' : ''}`} title="draw as construction geometry: dashed reference lines excluded from the profile (shift+x)" data-testid="sketch-construction-mode" onClick={toggleConstructionMode}>┄</button>
+        <button className={`btn-small ${sm.tool === 'dimension' ? 'active' : ''}`} title="dimension the selection, then click to place it (d)" data-testid="sketch-dimension" onClick={() => (sm.tool === 'dimension' ? setSketchTool(null) : startDimension())}>dimension</button>
+        <label className={`switch ${sm.construction ? 'on' : ''}`} title="the construction switch: new geometry, converts and offsets come out as construction while it is on (x)">
+          <input type="checkbox" checked={sm.construction} onChange={toggleConstructionMode} data-testid="sketch-construction-mode" />construction
+        </label>
+        <button className={`btn-small ${sm.tool === 'project' ? 'active' : ''} ${sm.construction && sm.tool === 'project' ? 'construction' : ''}`} title="convert body edges, vertices or a face outline into sketch geometry that follows the body (e); stays on until esc" data-testid="sketch-project" onClick={() => setSketchTool(sm.tool === 'project' ? null : 'project')}>convert</button>
         <span className="sketch-hint">
-          {tool ? `${tool.hint}${nPoints ? ` (${nPoints} placed)` : ''}`
+          {tool ? `${sm.construction ? 'construction · ' : ''}${tool.hint}${nPoints ? ` (${nPoints} placed)` : ''}`
             : sm.tool === 'dimension' ? (sm.dimPlacing ? 'click to place the dimension' : 'pick one or two entities')
-            : sm.tool === 'project' ? (hoverText || 'hover the body: click edges, vertices or a face outline to convert them · esc when done')
-            : sm.tool === 'offset' ? `offset ${sm.selection.length ? 'the selection' : 'the whole profile'}: set the distance, then click the side to offset to`
+            : sm.tool === 'project' ? (hoverText || `${sm.construction ? 'construction · ' : ''}hover the body: click edges, vertices or a face outline to convert them · esc when done`)
+            : sm.tool === 'offset' ? (pending ? 'type the distance' : `offset ${sm.selection.length ? 'the selection' : 'the whole profile'}: click the side to offset to, then type the distance`)
             : sm.dragging ? (sm.locked ? 'locked: fully constrained' : 'dragging…')
-            : hoverText || 'select: click, shift/ctrl+click adds · shift+click a body edge or vertex to relate to it · drag handles · d dimension · e convert · drag empty space or alt+drag orbits · esc'}
+            : hoverText || 'select: click, shift+click adds · right-click for relations and edits · drag handles · d dimension · e convert · x construction · esc'}
         </span>
         {cursor && <span className="sketch-cursor">{cursor[0]}, {cursor[1]}</span>}
         <span className={`sketch-dof ${sol?.fully_constrained ? 'ok' : sol?.conflicting?.length ? 'bad' : ''}`} data-testid="sketch-dof"
               title={sol && !sol.fully_constrained && sol.free_entities.length ? `free: ${freeText(sol)}` : undefined}>{dofText}{sm.solveMs !== null && sm.dragging ? ` · ${sm.solveMs.toFixed(0)} ms` : ''}</span>
-        <button className="btn-small" onClick={() => sceneRef.current?.normalTo()} title="look straight at the sketch plane again (ctrl+0)" data-testid="sketch-normal">normal to</button>
         <button className="btn-small" onClick={exitSketch} data-testid="sketch-exit">exit sketch</button>
       </div>
       {(sol?.redundant?.length || sol?.conflicting?.length || feature?.result?.error) ? (
@@ -547,42 +549,21 @@ export function SketchOverlay() {
           {sol?.redundant?.length ? <span>redundant: {sol.redundant.join(', ')}</span> : null}
         </div>
       ) : null}
-      {sm.bodySelection.length > 0 && !sm.tool && (
-        <div className="context-bar" data-testid="body-bar">
-          <span className="context-sel">body: {sm.bodySelection.map((e) => `${e.kind} ${e.id}`).join(' · ')}</span>
-          <button className="btn-small" data-testid="convert-body" onClick={() => void convertBodySelection(false)} title="sketch geometry that follows the body; a face gives its outline">convert</button>
-          <button className="btn-small" data-testid="convert-body-construction" onClick={() => void convertBodySelection(true)} title="the same, as construction geometry">convert as construction</button>
-          <button className="btn-small" onClick={() => toggleBodySelect(null, false)}>clear</button>
-        </div>
-      )}
-      {sm.selection.length > 0 && !sm.tool && (
-        <div className="context-bar" data-testid="context-bar">
-          <span className="context-sel">{sm.selection.join(' · ')}</span>
-          {choices.map((c) => (
-            <button key={c.kind} className="btn-small" data-testid={`constrain-${c.kind}`} onClick={() => addConstraint(c.kind, c.refs, c.options)}>{c.label}</button>
-          ))}
-          {dimPlan && <button className="btn-small" data-testid="constrain-dimension" onClick={startDimension}>{dimPlan.kind}</button>}
-          {selectedEntities.length > 0 && (
-            <button className={`btn-small ${allConstruction ? 'active' : ''}`} data-testid="constrain-construction" onClick={toggleConstructionSelection}
-                    title={allConstruction ? 'make profile geometry (x)' : 'make construction geometry (x)'}>construction</button>
-          )}
-          <button className="btn-small danger" onClick={deleteSelection} title="delete the selected entities (del)">delete</button>
-          <button className="btn-small" onClick={() => toggleSketchSelect(null, false)}>clear</button>
-        </div>
-      )}
       </div>
       {scene && frame && model && <SketchLabels scene={scene} frame={frame} model={model} placements={placements} onPlace={place} tick={tick} />}
       {snapGlyph && sm.tool && <span className="snap-glyph" style={{ left: snapGlyph.x + 16, top: snapGlyph.y - 16 }} title={snapGlyph.title} data-testid="snap-glyph">{snapGlyph.text}</span>}
-      {pending && pendingScreen && pendingPlan && (
-        <div className="dim-label editing pending" style={{ left: pendingScreen[0], top: pendingScreen[1] }} data-testid="dim-pending">
-          {pending.plan.alternatives && (
+      {pending && pendingScreen && (
+        <div className="dim-label editing pending" style={{ left: pendingScreen[0], top: pendingScreen[1] }} data-testid={pending.kind === 'offset' ? 'offset-pending' : 'dim-pending'}>
+          {pending.kind === 'dimension' && pending.plan.alternatives && (
             <span className="dim-alts">
               {[pending.plan, ...pending.plan.alternatives].map((p, i) => (
                 <button key={i} className={`btn-small ${i === dimAlt ? 'active' : ''}`} onClick={() => setDimAlt(i)}>{p.options?.along ? `d${p.options.along}` : 'dist'}</button>
               ))}
             </span>
           )}
-          <ExprInput text={fmtNum(pendingPlan.value)} names={expressionNames()} autoFocus commitUnchanged testId="dim-pending-input" onCommit={commitPending} onCancel={() => setPending(null)} />
+          {pending.kind === 'dimension' && pendingPlan
+            ? <ExprInput text={fmtNum(pendingPlan.value)} names={expressionNames()} autoFocus commitUnchanged testId="dim-pending-input" onCommit={commitPending} onCancel={() => setPending(null)} />
+            : <><span className="dim-kind">offset </span><ExprInput text={offsetDistance} names={expressionNames()} autoFocus commitUnchanged testId="offset-pending-input" onCommit={commitPending} onCancel={() => { setPending(null); setSketchTool(null); }} /></>}
         </div>
       )}
     </>
@@ -598,14 +579,14 @@ function distToLine(p: Pt, a: Pt, b: Pt): number {
   return n ? Math.abs(dx * (p[1] - a[1]) - dy * (p[0] - a[0])) / n : Math.hypot(p[0] - a[0], p[1] - a[1]);
 }
 
-function slotPreview(frame: PlaneFrame, a: Pt, b: Pt, w: number): THREE.Object3D {
+function slotPreview(frame: PlaneFrame, a: Pt, b: Pt, w: number, dashed = false): THREE.Object3D {
   const g = new THREE.Group();
   const r = w / 2, ang = Math.atan2(b[1] - a[1], b[0] - a[0]);
   const n: Pt = [-Math.sin(ang), Math.cos(ang)];
-  g.add(polyline(frame, [[a[0] + r * n[0], a[1] + r * n[1]], [b[0] + r * n[0], b[1] + r * n[1]]], COLORS.preview));
-  g.add(polyline(frame, [[a[0] - r * n[0], a[1] - r * n[1]], [b[0] - r * n[0], b[1] - r * n[1]]], COLORS.preview));
-  g.add(polyline(frame, curvePoints({ ref: '', entity: '', kind: 'arc', c: a, r, a0: ang + Math.PI / 2, a1: ang + 3 * Math.PI / 2 }), COLORS.preview));
-  g.add(polyline(frame, curvePoints({ ref: '', entity: '', kind: 'arc', c: b, r, a0: ang - Math.PI / 2, a1: ang + Math.PI / 2 }), COLORS.preview));
+  g.add(polyline(frame, [[a[0] + r * n[0], a[1] + r * n[1]], [b[0] + r * n[0], b[1] + r * n[1]]], COLORS.preview, dashed));
+  g.add(polyline(frame, [[a[0] - r * n[0], a[1] - r * n[1]], [b[0] - r * n[0], b[1] - r * n[1]]], COLORS.preview, dashed));
+  g.add(polyline(frame, curvePoints({ ref: '', entity: '', kind: 'arc', c: a, r, a0: ang + Math.PI / 2, a1: ang + 3 * Math.PI / 2 }), COLORS.preview, dashed));
+  g.add(polyline(frame, curvePoints({ ref: '', entity: '', kind: 'arc', c: b, r, a0: ang - Math.PI / 2, a1: ang + Math.PI / 2 }), COLORS.preview, dashed));
   g.add(points(frame, [a, b], COLORS.preview, 5));
   return g;
 }

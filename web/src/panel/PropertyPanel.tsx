@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   useStore, edit, select, enterSketch, exitSketch, featureByName, instanceByPath, leafPaths, setVisibility, setTransparency, isAssembly,
   expressionNames, setSketchHighlight, deleteConstraint, setConstraintValue, unknownNames, setError, deleteFeature, openFeatureDialog, setSuppressed,
   fixInstance, fetchAssemblyQueries, fmt, makeEditable, openDocument, isDrawing, exportDocument, modelDocPath, setMeta,
   setOverlay, isViewer, setDeleteConfirm, fetchSummary, toggleSketchSelect, hoverRefs,
+  addConstraint, beginDimension, toggleConstructionSelection, setSketchTool, deleteSketchSelection, convertBodySelection, toggleBodySelect,
 } from '../state/store';
 import { ParamPanel } from '../params/ParamPanel';
 import { PlaneDialog } from './PlaneDialog';
@@ -11,7 +12,7 @@ import { FeatureDialog } from './FeatureDialog';
 import { MATE_KINDS, TOOL_KINDS, VIEW_DIRECTIONS, DIMENSION_KINDS, type CompareRegion, type Constraint, type Entity, type Feature, type EditValue, type Overlay, type Tree } from '../api/types';
 import { MeasurePanel } from './MeasurePanel';
 import { ExprInput } from './ExprInput';
-import { GLYPH } from '../sketch/model';
+import { GLYPH, buildModel, validConstraints, dimensionFor, entityOf, refKind } from '../sketch/model';
 import { subAssemblyOf, openSubAssembly } from '../menu/entries';
 
 function parseValue(text: string): EditValue {
@@ -731,6 +732,7 @@ function SketchProps({ f, inSketch }: { f: Feature; inSketch: boolean }) {
   const constraints = f.constraints ?? [];
   return (
     <div className="fields">
+      {inSketch && <SketchSelected f={f} />}
       <RefLine label="on" text={`${f.arg_texts.on ?? String(f.args.on)}${f.args.offset ? ` offset ${f.args.offset}` : ''}${f.args.flip ? ' flipped' : ''}`} noHover={typeof f.args.on === 'string'} />
       <div className="panel-help">{f.entities.length} entities · {constraints.length} constraints</div>
       {sol && (
@@ -760,6 +762,57 @@ function SketchProps({ f, inSketch }: { f: Feature; inSketch: boolean }) {
           {constraints.map((c) => <ConstraintRow key={c.name} c={c} ro={f.read_only} inSketch={inSketch} sol={sol} />)}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+/** What the viewport's selection can take, at the top of the sketch panel: relations, a dimension,
+ * construction, offset, delete; body picks with their convert buttons. The right-click menu offers the same. */
+function SketchSelected({ f }: { f: Feature }) {
+  const sm = useStore((s) => s.sketchMode);
+  const preview = sm?.preview ?? null;
+  const model = useMemo(() => buildModel(f, preview), [f, preview]);
+  if (!sm) return null;
+  const sel = sm.selection, body = sm.bodySelection;
+  if (!sel.length && !body.length) return null;
+  const choices = sel.length ? validConstraints(model, sel) : [];
+  const plan = sel.length ? dimensionFor(model, sel) : null;
+  const ents = [...new Set(sel.map(entityOf))].map((n) => model.entities.get(n)).filter((e) => e && !e.projected && e.kind !== 'point');
+  const allConstruction = ents.length > 0 && ents.every((e) => e!.construction);
+  const curves = sel.filter((r) => refKind(model, r) !== 'point' && !r.endsWith('.axis'));
+  return (
+    <div className="sketch-selected" data-testid="sketch-selected">
+      {sel.length > 0 && (
+        <>
+          <div className="sel-names">{sel.join(' · ')}</div>
+          <div className="btn-row">
+            {choices.map((c) => (
+              <button key={c.kind} className="btn-small" data-testid={`constrain-${c.kind}`} onClick={() => void addConstraint(c.kind, c.refs, c.options)}>{c.label}</button>
+            ))}
+            {plan && <button className="btn-small" data-testid="constrain-dimension" title="dimension the selection, then click to place it (d)" onClick={() => beginDimension(plan)}>{plan.kind}</button>}
+            {!choices.length && !plan && <span className="panel-help">no relation fits this selection</span>}
+          </div>
+          <div className="btn-row">
+            {ents.length > 0 && (
+              <button className={`btn-small ${allConstruction ? 'active' : ''}`} data-testid="constrain-construction" onClick={() => void toggleConstructionSelection()}
+                      title={allConstruction ? 'make profile geometry' : 'make construction geometry'}>construction</button>
+            )}
+            {curves.length > 0 && <button className="btn-small" data-testid="sketch-offset" title="offset the selected curves: click the side, then type the distance" onClick={() => setSketchTool('offset')}>offset…</button>}
+            <button className="btn-small danger" onClick={() => void deleteSketchSelection()} title="delete the selected entities (del)">delete</button>
+            <button className="btn-small" onClick={() => toggleSketchSelect(null, false)}>clear</button>
+          </div>
+        </>
+      )}
+      {body.length > 0 && (
+        <>
+          <div className="sel-names" data-testid="body-selected">body: {body.map((e) => `${e.kind} ${e.id}`).join(' · ')}</div>
+          <div className="btn-row">
+            <button className="btn-small" data-testid="convert-body" onClick={() => void convertBodySelection(false)} title="sketch geometry that follows the body; a face gives its outline">convert</button>
+            <button className="btn-small" data-testid="convert-body-construction" onClick={() => void convertBodySelection(true)} title="the same, as construction geometry">convert as construction</button>
+            <button className="btn-small" onClick={() => toggleBodySelect(null, false)}>clear</button>
+          </div>
+        </>
+      )}
     </div>
   );
 }

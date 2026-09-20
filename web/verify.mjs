@@ -392,15 +392,23 @@ await page.waitForSelector('[data-testid=param-list]');
     /profile\.line\("line1", \(40, 20\), \(60, 20\)\)/.test(readFile()) && /profile\.horizontal\("h\d+", "line1"\)/.test(readFile()),
     readFile().match(/profile\.(line|horizontal)\("(line1|h\d+)".*/g)?.join(' | ') ?? '');
 
-  // select two lines: the context toolbar offers parallel, perpendicular, equal; apply parallel (implied by H + H: redundant)
+  // select two lines: the panel's selected section offers parallel, perpendicular, equal; apply parallel (implied by H + H: redundant)
   await clickAt(10, 0); await clickAt(0, 4, ['Shift']);
-  const bar = (await page.locator('[data-testid=context-bar]').textContent().catch(() => '')) ?? '';
+  await page.waitForSelector('[data-testid=sketch-selected]', { timeout: 5000 });
+  const bar = (await page.locator('[data-testid=sketch-selected]').textContent().catch(() => '')) ?? '';
+  // the right-click menu on a selected line carries the same relations, with the keys on the right
+  let pr = await at(10, 0); await page.mouse.click(pr[0], pr[1], { button: 'right' });
+  await page.waitForSelector('[data-testid=context-menu]', { timeout: 5000 });
+  const menuText = (await page.locator('[data-testid=context-menu]').textContent()) ?? '';
+  const menuHasKeys = (await page.locator('[data-testid=context-menu] .ctx-key').count()) >= 2;
+  await page.keyboard.press('Escape'); await page.waitForTimeout(150);
   h = (await st()).hash;
   await page.click('[data-testid=constrain-parallel]'); await waitHash(h);
   const sol2 = await profileSol();
-  check('selecting two lines offers line constraints and applying parallel writes it and flags it redundant',
-    /parallel/.test(bar) && /perpendicular/.test(bar) && /equal/.test(bar) && /profile\.parallel\("pa1", "bottom", "inner_bottom"\)/.test(readFile()) && sol2.redundant.includes('pa1'),
-    `bar: ${bar.slice(0, 80)}, redundant ${sol2.redundant}`);
+  check('selecting two lines offers line constraints in the panel and the menu, and applying parallel writes it and flags it redundant',
+    /parallel/.test(bar) && /perpendicular/.test(bar) && /equal/.test(bar) && /parallel/.test(menuText) && /offset…/.test(menuText) && /delete/.test(menuText) && menuHasKeys
+      && /profile\.parallel\("pa1", "bottom", "inner_bottom"\)/.test(readFile()) && sol2.redundant.includes('pa1'),
+    `panel: ${bar.slice(0, 80)}, menu: ${menuText.slice(0, 120)}, keys ${menuHasKeys}, redundant ${sol2.redundant}`);
 
   // dimension tool on the new line: length written, label shows the value
   await clickAt(50, 20); await page.keyboard.press('d'); await page.waitForTimeout(300);
@@ -447,16 +455,23 @@ await page.waitForSelector('[data-testid=param-list]');
     wroteConstruction && openBody?.result?.ok === false && !/inner_bottom".*construction=True/.test(readFile()) && backEntity?.construction === false && closedBody?.result?.ok === true,
     `wrote ${wroteConstruction}, body failed ${openBody?.result?.ok === false}, restored ${closedBody?.result?.ok} · ${readFile().match(/profile\.line\("inner_bottom".*/)?.[0]}`);
 
-  // draw-as-construction mode: a new line carries construction=True and renders as construction
-  await page.click('[data-testid=sketch-construction-mode]');
+  // the construction switch: the x key turns it on, the active tool button goes dashed, a new line carries construction=True
+  await page.locator('[data-testid=viewport] canvas').focus();
+  await page.keyboard.press('x'); await page.waitForTimeout(150);
+  const switchOn = await page.locator('[data-testid=sketch-construction-mode]').isChecked();
   await page.click('.sketch-bar .btn-small:has-text("line")');
+  const lineDashed = (await page.locator('.sketch-bar .btn-small.active.construction').count()) === 1;
+  const hintSaysConstruction = ((await page.locator('.sketch-hint').textContent()) ?? '').startsWith('construction');
   await clickAt(40, 30); h = (await st()).hash; await clickAt(60, 30.2); await waitHash(h);
   await page.keyboard.press('Escape'); await page.keyboard.press('Escape'); await page.waitForTimeout(200);
-  await page.click('[data-testid=sketch-construction-mode]');
+  const stillOn = await page.locator('[data-testid=sketch-construction-mode]').isChecked();  // stopping the tool leaves the switch alone
+  await page.click('[data-testid=sketch-construction-mode]'); await page.waitForTimeout(100);
+  const switchOff = !(await page.locator('[data-testid=sketch-construction-mode]').isChecked());
   const cLine = (await st()).tree.features.find((f) => f.name === 'profile').entities.find((e) => e.name === 'line2');
-  check('drawing in construction mode writes construction=True with the inferred constraint and flags the entity',
-    /profile\.line\("line2", \(40, 30\), \(60, 30\), construction=True\)/.test(readFile()) && /profile\.horizontal\("h\d+", "line2"\)/.test(readFile()) && cLine?.construction === true,
-    readFile().match(/profile\.line\("line2".*/)?.[0] ?? 'no line2');
+  check('the construction switch (x) marks the active tool dashed and writes construction=True with the inferred constraint',
+    switchOn && lineDashed && hintSaysConstruction && stillOn && switchOff
+      && /profile\.line\("line2", \(40, 30\), \(60, 30\), construction=True\)/.test(readFile()) && /profile\.horizontal\("h\d+", "line2"\)/.test(readFile()) && cLine?.construction === true,
+    `on ${switchOn}, dashed ${lineDashed}, hint ${hintSaysConstruction}, stayed ${stillOn}, off ${switchOff} · ${readFile().match(/profile\.line\("line2".*/)?.[0] ?? 'no line2'}`);
 
   // projection: in the holes sketch, click the body's top face
   await page.click('.sketch-bar .btn-small:has-text("exit sketch")');
@@ -932,18 +947,23 @@ check('new assembly creates an assembly file and an instance picked from the pro
   const stayed = (await st()).sketchMode !== null;
   check('a sketch opens in orthographic projection and escape keeps it open', inSketchOrtho && stayed);
 
-  // two lines at an angle: the context bar offers an angle dimension
+  // two lines at an angle: the panel's selected section offers an angle dimension
   await page.evaluate(() => window.__plainsolid.actions.setSketchSelection(['line1', 'right']));
   await page.waitForTimeout(200);
   const dimLabel = (await page.locator('[data-testid=constrain-dimension]').textContent().catch(() => '')) ?? '';
-  check('two lines at an angle offer an angle dimension in the context bar', dimLabel.trim() === 'angle', dimLabel);
+  check('two lines at an angle offer an angle dimension in the panel', dimLabel.trim() === 'angle', dimLabel);
 
-  // offset the L loop outward by 3 through the offset tool: click outside the loop for the side
+  // offset the L loop outward by 3 from the right-click menu: click outside the loop for the side, type the distance where you clicked
   await page.evaluate(() => window.__plainsolid.actions.setSketchSelection(['bottom', 'right', 'inner_bottom', 'inner_wall', 'top', 'outer_wall']));
-  await page.click('[data-testid=sketch-offset]');
-  await page.fill('[data-testid=offset-distance]', '3');
-  let h = (await st()).hash;
+  const pOff = await at(10, 0); await page.mouse.click(pOff[0], pOff[1], { button: 'right' });
+  await page.waitForSelector('[data-testid=ctx-offset]', { timeout: 5000 });
+  await page.click('[data-testid=ctx-offset]');
+  await page.waitForTimeout(150);
   await clickAt(-45, -10);
+  await page.waitForSelector('[data-testid=offset-pending-input]', { timeout: 5000 });
+  await page.fill('[data-testid=offset-pending-input]', '3');
+  let h = (await st()).hash;
+  await page.locator('[data-testid=offset-pending-input]').press('Enter');
   await waitHash(h);
   const offsetStmt = readFile().match(/profile\.offset\(.*/)?.[0] ?? '';
   const sOff = await st();
@@ -967,7 +987,10 @@ check('new assembly creates an assembly file and an instance picked from the pro
   await page.keyboard.up('Alt');
   await page.waitForTimeout(300);
   const camRotated = (await st()).camera;
-  await page.click('[data-testid=sketch-normal]');
+  // "normal to" lives in the right-click menu on empty plane (and on ctrl+0)
+  await page.mouse.click(vp3.x + vp3.width * 0.15, vp3.y + vp3.height * 0.85, { button: 'right' });
+  await page.waitForSelector('[data-testid=ctx-normal-to]', { timeout: 5000 });
+  await page.click('[data-testid=ctx-normal-to]');
   await page.waitForTimeout(300);
   const camNormal = (await st()).camera;
   const dir = (c) => { const d = [c.position[0] - c.target[0], c.position[1] - c.target[1], c.position[2] - c.target[2]]; const n = Math.hypot(...d); return d.map((x) => x / n); };
@@ -1033,7 +1056,7 @@ check('new assembly creates an assembly file and an instance picked from the pro
   // a plain click on the body inside the sketch selects it for conversion; convert writes a project entity
   const faceForConvert = await page.evaluate(() => { const h = window.__plainsolid.getState().mesh.header; const e = Object.entries(h.face_labels).find(([, l]) => l === 'body'); return e ? Number(e[0]) : null; });
   await page.evaluate((id) => window.__plainsolid.actions.toggleBodySelect({ kind: 'face', id }, false), faceForConvert);
-  await page.waitForSelector('[data-testid=body-bar]', { timeout: 5000 });
+  await page.waitForSelector('[data-testid=body-selected]', { timeout: 5000 });
   h = (await st()).hash;
   await page.click('[data-testid=convert-body]');
   await waitHash(h);

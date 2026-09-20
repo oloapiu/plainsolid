@@ -41,7 +41,8 @@ export function Help({ onClose }: { onClose: () => void }) {
               <Row keys={['l', 'c', 'a', 'r', 's', 'p', 'o']} what="line, circle, arc, rect, slot, polygon, point" />
               <Row keys={['d']} what="dimension the selection, then click to place it" />
               <Row keys={['e']} what="convert body edges, vertices or a face outline" />
-              <Row keys={['x', 'shift+x']} what="construction: flip the selection, draw as construction" />
+              <Row keys={['x']} what="the construction switch: new geometry, converts and offsets come out as construction while it is on" />
+              <Row keys={['right-click']} what="relations, a dimension, offset, construction or delete for the selection; tools on empty space" />
               <Row keys={['shift+click']} what="add to the selection; on a body edge or vertex: relate to it" />
               <Row keys={['shift']} what="held while drawing: no snapping" />
               <Row keys={['alt+drag', 'middle drag']} what="orbit (a left drag on empty space orbits too)" />

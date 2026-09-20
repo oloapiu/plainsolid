@@ -32,7 +32,7 @@ export function ContextMenu() {
       {menu.entries.map((e, i) => (e.sep
         ? <div key={i} className="ctx-sep" />
         : <button key={i} className={`ctx-item ${e.danger ? 'danger' : ''}`} disabled={e.disabled} title={e.title} data-testid={`ctx-${e.id}`}
-                  onClick={() => { closeContextMenu(); e.run?.(); }}>{e.label}</button>))}
+                  onClick={() => { closeContextMenu(); e.run?.(); }}>{e.label}{e.key && <span className="ctx-key">{e.key}</span>}</button>))}
     </div>
   );
 }

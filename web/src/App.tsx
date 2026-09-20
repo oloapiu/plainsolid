@@ -187,7 +187,7 @@ export function App() {
     : tool === 'measure' ? (measurePicks === 0 ? 'measure: click a face, an edge or a vertex' : measurePicks === 1 ? 'measure: click a second entity, or pin' : 'measure: two entities · a third click starts over')
     : tool === 'section' ? 'section: drag the slider or type an offset · flip · clear · right-click a face sets the offset to it'
     : tool === 'move' ? (moveMode === 'translate' ? 'move: drag a part to slide it · r turns' : 'move: drag a part to turn it · m slides')
-    : sketchMode ? 'sketch: esc stops the tool · d dimension · e convert · x construction · shift held draws without snapping · right-click for relations'
+    : sketchMode ? 'sketch: esc stops the tool · d dimension · e convert · x construction switch · shift held draws without snapping · right-click for relations and edits'
     : drawing ? 'drag a view, dimension or note to move it · scroll zooms · right-click for actions'
     : selectedEdge !== null ? 'edge selected · right-click: fillet, chamfer, plane, measure · delete removes its feature'
     : selectedFace !== null ? 'face selected · right-click: sketch here, plane, normal to (ctrl+0)'

@@ -144,9 +144,17 @@ option { background: var(--bg2); color: var(--fg); }
 
 /* sketch editor */
 .sketch-warn { display: flex; gap: 12px; background: rgba(60, 30, 20, 0.85); border: 1px solid var(--err); border-radius: 4px; padding: 3px 8px; font-size: 11px; color: #ffb3a7; pointer-events: none; z-index: 2; }
-.context-bar { align-self: flex-start; display: flex; align-items: center; gap: 4px; background: rgba(20, 23, 27, 0.9); border: 1px solid var(--accent); border-radius: 3px; padding: 3px 6px; }
-.sketch-warn ~ .context-bar { top: 70px; }
-.context-sel { font-family: var(--mono); font-size: 11px; color: var(--fg2); margin-right: 6px; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* the construction switch: a small on/off toggle in the sketch bar */
+.switch { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; cursor: pointer; user-select: none; white-space: nowrap; }
+.switch input { appearance: none; -webkit-appearance: none; width: 24px; height: 13px; margin: 0; border-radius: 7px; background: var(--bg3); border: 1px solid var(--line); position: relative; cursor: pointer; }
+.switch input::after { content: ''; position: absolute; top: 1px; left: 1px; width: 9px; height: 9px; border-radius: 50%; background: var(--fg2); transition: left 0.12s; }
+.switch input:checked { background: var(--accent); border-color: var(--accent); }
+.switch input:checked::after { left: 12px; background: #111; }
+.switch.on { color: var(--accent); }
+/* the selected section at the top of the sketch panel: what the selection can take */
+.sketch-selected { border: 1px solid var(--accent); border-radius: 3px; padding: 4px 6px; margin: 2px 0 6px; }
+.sketch-selected .sel-names { font-family: var(--mono); font-size: 11px; color: var(--fg2); margin-bottom: 3px; word-break: break-all; }
+.sketch-selected .btn-row { flex-wrap: wrap; margin: 3px 0; }
 .sketch-bar { flex-wrap: wrap; row-gap: 3px; }
 .sketch-bar > .btn-small { white-space: nowrap; }
 .sketch-bar .sketch-hint { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
@@ -210,7 +218,9 @@ option { background: var(--bg2); color: var(--fg); }
 .pick-field .pick-value.empty { color: var(--fg2); font-style: italic; }
 .pick-field .pick-select { background: var(--bg3); color: var(--fg); border: 1px solid var(--line); border-radius: 3px; font-size: 11px; max-width: 80px; }
 .pick-hint { border-color: #7fb2e6; }
-.btn-small.dashed { border-style: dashed; letter-spacing: -1px; font-weight: bold; }
+.btn-small.construction { border-style: dashed; }
+.btn-small.active.construction { border-color: #111; }
+.dim-label .dim-kind { color: var(--fg2); }
 
 /* feature dialogs: lists of picked entities, inline choices */
 .pick-list { display: flex; flex-wrap: wrap; gap: 4px; margin: 2px 0 4px 76px; }
@@ -222,7 +232,6 @@ option { background: var(--bg2); color: var(--fg); }
 .field.inline > select { min-width: 0; max-width: 100%; justify-self: start; }
 .feature-menu { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px 8px; border-bottom: 1px solid var(--line); background: var(--bg2); }
 
-.sketch-offset-input { width: 52px; background: var(--bg3); border: 1px solid var(--line); border-radius: 3px; padding: 2px 5px; font-family: var(--mono); font-size: 11px; color: inherit; }
 
 /* assemblies */
 .tree-row.hidden-item .tree-name { opacity: 0.45; }
@@ -330,7 +339,9 @@ table.bom td:last-child { text-align: right; }
 /* the right-click menu */
 .ctx-menu { position: fixed; z-index: 90; min-width: 170px; max-width: 260px; background: var(--bg2); border: 1px solid var(--line); border-radius: 4px; padding: 4px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); display: flex; flex-direction: column; font-size: 12px; }
 .ctx-title { padding: 2px 8px 4px; font-size: 10px; color: var(--fg2); text-transform: uppercase; letter-spacing: 0.05em; font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ctx-item { text-align: left; background: transparent; border: 0; border-radius: 3px; padding: 3px 8px; cursor: pointer; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ctx-item { display: flex; justify-content: space-between; align-items: baseline; gap: 14px; text-align: left; background: transparent; border: 0; border-radius: 3px; padding: 3px 8px; cursor: pointer; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ctx-key { color: var(--fg2); font-family: var(--mono); font-size: 10px; }
+.ctx-item:hover:not(:disabled) .ctx-key { color: #333; }
 .ctx-item:hover:not(:disabled) { background: var(--accent); color: #111; }
 .ctx-item:disabled { color: var(--fg2); cursor: default; opacity: 0.6; }
 .ctx-item.danger { color: #ef7a6a; }
