@@ -151,7 +151,7 @@ option { background: var(--bg2); color: var(--fg); }
 .switch input:checked { background: var(--accent); border-color: var(--accent); }
 .switch input:checked::after { left: 12px; background: #111; }
 .switch.on { color: var(--accent); }
-/* the selected section at the top of the sketch panel: what the selection can take */
+/* the selected section: what the selection can take (layout below, with the sketch panel) */
 .sketch-selected { border: 1px solid var(--accent); border-radius: 3px; padding: 4px 6px; margin: 2px 0 6px; }
 .sketch-selected .sel-names { font-family: var(--mono); font-size: 11px; color: var(--fg2); margin-bottom: 3px; word-break: break-all; }
 .sketch-selected .btn-row { flex-wrap: wrap; margin: 3px 0; }
@@ -386,3 +386,42 @@ table.bom td:last-child { text-align: right; }
 .import-pop { position: fixed; top: 44px; left: 50%; transform: translateX(-50%); z-index: 45; width: 380px; max-width: 90vw; background: var(--bg2); border: 1px solid var(--line); border-radius: 4px; padding: 8px; box-shadow: 0 6px 18px rgba(0,0,0,0.4); }
 .import-pop input { width: 100%; background: var(--bg3); border: 1px solid var(--line); border-radius: 3px; padding: 3px 6px; font-family: var(--mono); min-width: 0; }
 .import-pop .files-field { grid-template-columns: 44px 1fr; }
+
+/* the sketch panel: an actions row under the header, rows on a content-sized grid, a sticky
+   selected section, entity rows that expand when selected, constraint rows on one grammar */
+.fields { grid-template-columns: fit-content(110px) minmax(0, 1fr); }
+.right .props-title { padding-right: 26px; }  /* the collapse toggle sits at the corner */
+.props-actions { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 10px 6px; }
+.props > .section-title { padding: 0 10px; margin-top: 12px; }
+.section-title .count { margin-left: 6px; color: var(--fg2); letter-spacing: 0; text-transform: none; font-family: var(--mono); }
+.rows { padding: 0 4px; }
+.ent-row { display: grid; grid-template-columns: 40px minmax(56px, max-content) minmax(0, 1fr) 22px; column-gap: 6px; row-gap: 4px; align-items: baseline; padding: 4px 6px; border-top: 1px solid var(--line); border-radius: 3px; }
+.ent-row.clickable { cursor: pointer; }
+.ent-row.selected { background: var(--bg3); }
+.ent-row:hover { background: var(--bg3); }
+.ent-kind { color: var(--fg2); font-size: 10px; }
+.ent-name { font-family: var(--mono); overflow-wrap: anywhere; }
+.ent-summary { font-family: var(--mono); font-size: 11px; color: var(--fg2); overflow-wrap: anywhere; line-height: 1.35; }
+.ent-row .btn-small.danger { padding: 0 5px; }
+.ent-args { grid-column: 2 / -1; display: grid; grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr); column-gap: 6px; row-gap: 4px; align-items: center; }
+.ent-args .field { display: contents; }
+.ent-args .field > span { font-size: 10px; color: var(--fg2); width: auto; }
+.ent-args input, .ent-args .expr-input input { width: 100%; min-width: 0; padding: 2px 5px; font-size: 11px; }
+.ent-args .expr-input { grid-column: span 1; }
+.ent-args > .panel-help, .ent-args > .mono.refs { grid-column: 1 / -1; }
+.con-row { display: grid; grid-template-columns: 18px minmax(44px, max-content) minmax(0, 1fr) auto 22px; column-gap: 6px; align-items: center; padding: 3px 6px; border-top: 1px solid var(--line); }
+.con-row:hover { background: var(--bg3); }
+.con-glyph { color: #d8c27a; font-size: 11px; text-align: center; }
+.con-name { font-family: var(--mono); overflow-wrap: anywhere; }
+.con-refs { font-family: var(--mono); font-size: 10px; color: var(--fg2); overflow-wrap: anywhere; line-height: 1.35; }
+.con-refs .badge { margin-left: 4px; }
+.con-row.conflict .con-name { color: var(--err); }
+.con-row.redundant .con-name { color: var(--warn); }
+.con-value { display: flex; align-items: center; gap: 4px; }
+.con-value .expr-input input { width: 72px; background: var(--bg3); border: 1px solid var(--line); border-radius: 3px; padding: 2px 5px; font-family: var(--mono); font-size: 11px; }
+.con-row .btn-small.danger { padding: 0 5px; }
+.sketch-selected { position: sticky; top: 0; z-index: 2; background: var(--bg2); margin: 6px 6px 0; padding: 4px 6px 6px; border: 1px solid var(--accent); border-radius: 3px; }
+.sketch-selected .sel-title { display: flex; align-items: center; gap: 6px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg2); }
+.sketch-selected .sel-names { flex: 1; min-width: 0; text-transform: none; letter-spacing: 0; font-family: var(--mono); font-size: 11px; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 0; }
+.sketch-selected .sel-group { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 5px; }
+.sketch-selected .sel-sep { width: 6px; }

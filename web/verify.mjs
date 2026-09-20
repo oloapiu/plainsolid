@@ -106,7 +106,7 @@ await page.locator('[data-testid=sketch-exit]').click().catch(() => {}); await p
 
 // sketch mode: draw a circle with two clicks
 await page.click('[data-testid=feature-holes]');
-await page.click('.btn:has-text("edit sketch")');
+await page.click('[data-testid=sketch-edit]');
 await page.waitForSelector('[data-testid=sketch-bar]');
 await page.click('.sketch-bar .btn-small:has-text("circle")');
 await page.waitForTimeout(300);
@@ -353,7 +353,7 @@ await page.waitForSelector('[data-testid=param-list]');
   const changedLines = (a, b) => { const x = a.split('\n'), y = b.split('\n'); const out = []; for (let i = 0; i < Math.max(x.length, y.length); i++) if (x[i] !== y[i]) out.push(y[i] ?? x[i]); return out; };
 
   await page.click('[data-testid=feature-profile]');
-  await page.click('.btn:has-text("edit sketch")');
+  await page.click('[data-testid=sketch-edit]');
   await page.waitForSelector('[data-testid=sketch-bar]');
   await page.waitForTimeout(1200);
   const sol0 = await profileSol();
@@ -554,7 +554,7 @@ await page.waitForSelector('[data-testid=param-list]');
   await page.click('.sketch-bar .btn-small:has-text("exit sketch")');
   await page.waitForTimeout(300);
   await page.click('[data-testid=feature-holes]');
-  await page.click('.btn:has-text("edit sketch")');
+  await page.click('[data-testid=sketch-edit]');
   await page.waitForSelector('[data-testid=sketch-bar]');
   await page.waitForFunction(() => window.__plainsolid.getState().mesh?.header.upto === 'outer', null, { timeout: 15000 });
   await page.waitForTimeout(500);
@@ -1015,7 +1015,7 @@ check('new assembly creates an assembly file and an instance picked from the pro
 
   // entering a sketch goes orthographic and leaving restores perspective; escape stays inside
   await page.click('[data-testid=feature-profile]');
-  await page.click('.btn:has-text("edit sketch")');
+  await page.click('[data-testid=sketch-edit]');
   await page.waitForSelector('[data-testid=sketch-bar]');
   await page.waitForTimeout(500);
   const inSketchOrtho = await page.evaluate(() => window.__plainsolid.isOrtho());
@@ -1114,7 +1114,7 @@ check('new assembly creates an assembly file and an instance picked from the pro
 
   // a body edge used in a relation from inside the holes sketch: converted silently, selected
   await page.click('[data-testid=feature-holes]');
-  await page.click('.btn:has-text("edit sketch")');
+  await page.click('[data-testid=sketch-edit]');
   await page.waitForSelector('[data-testid=sketch-bar]');
   await page.waitForFunction(() => window.__plainsolid.getState().mesh?.header.upto === 'outer', null, { timeout: 15000 });
   await page.waitForTimeout(400);

@@ -730,44 +730,44 @@ function DeleteButton({ f }: { f: Feature }) {
 function SketchProps({ f, inSketch }: { f: Feature; inSketch: boolean }) {
   const sol = f.result?.sketch ?? null;
   const constraints = f.constraints ?? [];
+  const status = sol ? (sol.fully_constrained ? 'fully constrained' : `${sol.dof} degree${sol.dof === 1 ? '' : 's'} of freedom`) : f.result?.error ? 'failed' : '';
+  const free = sol && sol.free_entities.length ? freeText(sol) : '';
   return (
-    <div className="fields">
-      {inSketch && <SketchSelected f={f} />}
-      <RefLine label="on" text={`${f.arg_texts.on ?? String(f.args.on)}${f.args.offset ? ` offset ${f.args.offset}` : ''}${f.args.flip ? ' flipped' : ''}`} noHover={typeof f.args.on === 'string'} />
-      <div className="panel-help">{f.entities.length} entities · {constraints.length} constraints</div>
-      {sol && (
-        <div className={`sketch-status ${sol.fully_constrained ? 'ok' : ''}`} data-testid="sketch-status">
-          {sol.fully_constrained ? 'fully constrained' : `${sol.dof} degree${sol.dof === 1 ? '' : 's'} of freedom`}
-          {sol.free_entities.length > 0 && <span className="panel-help"> free: {freeText(sol)}</span>}
-        </div>
-      )}
-      <div className="btn-row">
+    <>
+      <div className="props-actions" data-testid="sketch-actions">
         {!f.read_only && (inSketch
-          ? <button className="btn" onClick={exitSketch}>exit sketch</button>
-          : <button className="btn" onClick={() => enterSketch(f)} title="draw entities on the plane">edit sketch</button>)}
-        {f.variable && <button className="btn" onClick={() => openFeatureDialog('extrude', f.name)} title="extrude the profile: set the depth, watch the preview, add" data-testid="add-extrude">extrude</button>}
-        {f.variable && <button className="btn" onClick={() => openFeatureDialog('cut', f.name)} title="cut with the profile: through all or to a depth, with a preview" data-testid="add-cut">cut</button>}
-        {f.variable && <button className="btn" onClick={() => openFeatureDialog('revolve', f.name)} title="revolve the profile about a line of the sketch or a global axis" data-testid="add-revolve">revolve</button>}
+          ? <button className="btn-small" onClick={exitSketch} data-testid="sketch-edit">exit sketch</button>
+          : <button className="btn-small" onClick={() => enterSketch(f)} title="draw entities on the plane" data-testid="sketch-edit">edit sketch</button>)}
+        {f.variable && <button className="btn-small" onClick={() => openFeatureDialog('extrude', f.name)} title="extrude the profile: set the depth, watch the preview, add" data-testid="add-extrude">extrude</button>}
+        {f.variable && <button className="btn-small" onClick={() => openFeatureDialog('cut', f.name)} title="cut with the profile: through all or to a depth, with a preview" data-testid="add-cut">cut</button>}
+        {f.variable && <button className="btn-small" onClick={() => openFeatureDialog('revolve', f.name)} title="revolve the profile about a line of the sketch or a global axis" data-testid="add-revolve">revolve</button>}
       </div>
       {!f.variable && <div className="panel-help">assign the sketch to a variable to extrude it from here</div>}
-      <BoolField label="suppressed" value={Boolean(f.suppressed)} disabled={f.read_only} onCommit={(v) => setSuppressed(f.name, v)} testId="suppress" />
-      <table className="entities" data-testid="entity-list">
-        <tbody>
-          {f.entities.map((e) => <EntityRow key={e.name} sketch={f.name} e={e} ro={f.read_only} inSketch={inSketch} />)}
-        </tbody>
-      </table>
-      {constraints.length > 0 && <div className="section-title">constraints</div>}
-      <table className="entities constraints" data-testid="constraint-list">
-        <tbody>
-          {constraints.map((c) => <ConstraintRow key={c.name} c={c} ro={f.read_only} inSketch={inSketch} sol={sol} />)}
-        </tbody>
-      </table>
-    </div>
+      <div className="fields">
+        <RefLine label="on" text={`${f.arg_texts.on ?? String(f.args.on)}${f.args.offset ? ` offset ${f.args.offset}` : ''}${f.args.flip ? ' flipped' : ''}`} noHover={typeof f.args.on === 'string'} />
+        {status && (
+          <div className="measure-row" data-testid="sketch-status">
+            <span>status</span>
+            <span className={`sketch-status ${sol?.fully_constrained ? 'ok' : ''}`} title={free ? `free: ${free}` : undefined}>{status}{free ? ' ⓘ' : ''}</span>
+          </div>
+        )}
+        <BoolField label="suppressed" value={Boolean(f.suppressed)} disabled={f.read_only} onCommit={(v) => setSuppressed(f.name, v)} testId="suppress" />
+      </div>
+      {inSketch && <SketchSelected f={f} />}
+      <div className="section-title">entities <span className="count">{f.entities.length}</span></div>
+      <div className="rows" data-testid="entity-list">
+        {f.entities.map((e) => <EntityRow key={e.name} sketch={f.name} e={e} ro={f.read_only} inSketch={inSketch} />)}
+      </div>
+      <div className="section-title">constraints <span className="count">{constraints.length}</span></div>
+      <div className="rows" data-testid="constraint-list">
+        {constraints.map((c) => <ConstraintRow key={c.name} c={c} ro={f.read_only} inSketch={inSketch} sol={sol} />)}
+      </div>
+    </>
   );
 }
 
-/** What the viewport's selection can take, at the top of the sketch panel: relations, a dimension,
- * construction, offset, delete; body picks with their convert buttons. The right-click menu offers the same. */
+/** What the viewport's selection can take, under the sketch's rows and sticky while the lists
+ * scroll: relations, a dimension, then the edits, then delete. The right-click menu offers the same. */
 function SketchSelected({ f }: { f: Feature }) {
   const sm = useStore((s) => s.sketchMode);
   const preview = sm?.preview ?? null;
@@ -784,39 +784,36 @@ function SketchSelected({ f }: { f: Feature }) {
   const corners = sel.length ? cornersOf(model, sel) : null;
   const cornerAt = (): [number, number] => { const c = corners![0]; const p = 'entity' in c ? handleAt(model, `${c.entity}.${c.corner}`) : handleAt(model, c.a); return p ?? [0, 0]; };
   const cut = sel.length === 1 ? removableCut(model, sel[0]) : null;
+  const B = (props: { id: string; label: string; title?: string; on: () => void; active?: boolean; danger?: boolean }) => (
+    <button className={`btn-small ${props.active ? 'active' : ''} ${props.danger ? 'danger' : ''}`} data-testid={props.id} title={props.title} onClick={props.on}>{props.label}</button>
+  );
   return (
     <div className="sketch-selected" data-testid="sketch-selected">
       {sel.length > 0 && (
         <>
-          <div className="sel-names">{sel.join(' · ')}</div>
-          <div className="btn-row">
-            {choices.map((c) => (
-              <button key={c.kind} className="btn-small" data-testid={`constrain-${c.kind}`} onClick={() => void addConstraint(c.kind, c.refs, c.options)}>{c.label}</button>
-            ))}
-            {plan && <button className="btn-small" data-testid="constrain-dimension" title="the dimension tool with this selection: click to place it (d)" onClick={startDimension}>{plan.kind}</button>}
+          <div className="sel-title"><span>selected</span><span className="sel-names" title={sel.join(', ')}>{sel.join(' · ')}</span>
+            <button className="btn-small" onClick={() => toggleSketchSelect(null, false)} title="clear the selection (esc)">clear</button></div>
+          <div className="sel-group">
+            {choices.map((c) => <B key={c.kind} id={`constrain-${c.kind}`} label={c.label} on={() => void addConstraint(c.kind, c.refs, c.options)} />)}
+            {plan && <B id="constrain-dimension" label={plan.kind} title="the dimension tool with this selection: click to place it (d)" on={startDimension} />}
             {!choices.length && !plan && <span className="panel-help">no relation fits this selection</span>}
-          </div>
-          <div className="btn-row">
-            {ents.length > 0 && (
-              <button className={`btn-small ${allConstruction ? 'active' : ''}`} data-testid="constrain-construction" onClick={() => void toggleConstructionSelection()}
-                      title={allConstruction ? 'make profile geometry' : 'make construction geometry'}>construction</button>
-            )}
-            {corners && <button className="btn-small" data-testid="sketch-fillet" title="round the corner: type the radius" onClick={() => askCorner('fillet', corners, cornerAt())}>fillet…</button>}
-            {corners && <button className="btn-small" data-testid="sketch-chamfer" title="bevel the corner: type the setback" onClick={() => askCorner('chamfer', corners, cornerAt())}>chamfer…</button>}
-            {cut && <button className="btn-small" data-testid="sketch-unfillet" onClick={() => void unfillet(cut.entity)}>remove the {cut.what}</button>}
-            {curves.length > 0 && <button className="btn-small" data-testid="sketch-offset" title="offset the selected curves: click the side, then type the distance" onClick={() => setSketchTool('offset')}>offset…</button>}
-            {deletable && <button className="btn-small danger" onClick={() => void deleteSketchSelection()} title="delete the selected entities (del)">delete</button>}
-            <button className="btn-small" onClick={() => toggleSketchSelect(null, false)}>clear</button>
+            {(ents.length > 0 || curves.length > 0 || corners || cut) && <span className="sel-sep" />}
+            {ents.length > 0 && <B id="constrain-construction" label="construction" active={allConstruction} title={allConstruction ? 'make profile geometry' : 'make construction geometry'} on={() => void toggleConstructionSelection()} />}
+            {curves.length > 0 && <B id="sketch-offset" label="offset…" title="offset the selected curves: click the side, then type the distance" on={() => setSketchTool('offset')} />}
+            {corners && <B id="sketch-fillet" label="fillet…" title="round the corner: type the radius" on={() => askCorner('fillet', corners, cornerAt())} />}
+            {corners && <B id="sketch-chamfer" label="chamfer…" title="bevel the corner: type the setback" on={() => askCorner('chamfer', corners, cornerAt())} />}
+            {cut && <B id="sketch-unfillet" label={`remove the ${cut.what}`} on={() => void unfillet(cut.entity)} />}
+            {deletable && <><span className="sel-sep" /><B id="sketch-delete" label="delete" danger title="delete the selected entities (del)" on={() => void deleteSketchSelection()} /></>}
           </div>
         </>
       )}
       {body.length > 0 && (
         <>
-          <div className="sel-names" data-testid="body-selected">body: {body.map((e) => `${e.kind} ${e.id}`).join(' · ')}</div>
-          <div className="btn-row">
-            <button className="btn-small" data-testid="convert-body" onClick={() => void convertBodySelection(false)} title="sketch geometry that follows the body; a face gives its outline">convert</button>
-            <button className="btn-small" data-testid="convert-body-construction" onClick={() => void convertBodySelection(true)} title="the same, as construction geometry">convert as construction</button>
-            <button className="btn-small" onClick={() => toggleBodySelect(null, false)}>clear</button>
+          <div className="sel-title"><span>body</span><span className="sel-names" data-testid="body-selected">{body.map((e) => `${e.kind} ${e.id}`).join(' · ')}</span>
+            <button className="btn-small" onClick={() => toggleBodySelect(null, false)}>clear</button></div>
+          <div className="sel-group">
+            <B id="convert-body" label="convert" title="sketch geometry that follows the body; a face gives its outline" on={() => void convertBodySelection(false)} />
+            <B id="convert-body-construction" label="convert as construction" title="the same, as construction geometry" on={() => void convertBodySelection(true)} />
           </div>
         </>
       )}
@@ -827,73 +824,103 @@ function SketchSelected({ f }: { f: Feature }) {
 function ConstraintRow({ c, ro, inSketch, sol }: { c: Constraint; ro: boolean; inSketch: boolean; sol: Feature['result'] extends infer R ? (R extends { sketch?: infer S } ? S : never) : never }) {
   const conflict = sol?.conflicting?.includes(c.name);
   const redundant = sol?.redundant?.includes(c.name);
+  const glyph = c.dimension ? { length: '↔', distance: '↔', diameter: 'Ø', radius: 'R', angle: '∠' }[c.kind] ?? c.kind[0] : GLYPH[c.kind] ?? c.kind[0];
   return (
-    <tr className={`entity-row constraint-row ${conflict ? 'conflict' : ''} ${redundant ? 'redundant' : ''}`} data-testid={`constraint-${c.name}`}
-        onMouseEnter={() => inSketch && setSketchHighlight([c.name, ...c.refs])} onMouseLeave={() => inSketch && setSketchHighlight([])}>
-      <td className="entity-kind" title={c.kind}>{c.dimension ? c.kind : `${GLYPH[c.kind] ?? ''} ${c.kind}`}</td>
-      <td className="entity-name">{c.name}</td>
-      <td className="entity-fields">
-        <span className="mono refs">{c.refs.join(', ')}{c.options?.along ? ` along ${String(c.options.along)}` : ''}</span>
+    <div className={`con-row ${conflict ? 'conflict' : ''} ${redundant ? 'redundant' : ''}`} data-testid={`constraint-${c.name}`} title={`${c.kind} ${c.name}: ${c.refs.join(', ')}`}
+         onMouseEnter={() => inSketch && setSketchHighlight([c.name, ...c.refs])} onMouseLeave={() => inSketch && setSketchHighlight([])}>
+      <span className="con-glyph">{glyph}</span>
+      <span className="con-name">{c.name}</span>
+      <span className="con-refs">{c.refs.join(', ')}{c.options?.along ? ` along ${String(c.options.along)}` : ''}{c.options?.reverse ? ' reverse' : ''}
+        {conflict && <span className="badge err">conflict</span>}{redundant && <span className="badge warn">redundant</span>}</span>
+      <span className="con-value">
         {c.dimension && (
-          <span className="dim-field">
-            <ExprInput text={c.value_text ?? String(c.value ?? '')} names={expressionNames()} disabled={ro} testId={`constraint-value-${c.name}`}
-                       onCommit={(t) => setConstraintValue(c.name, t)} />
+          <>
+            <ExprInput text={c.value_text ?? String(c.value ?? '')} names={expressionNames()} disabled={ro} testId={`constraint-value-${c.name}`} onCommit={(t) => setConstraintValue(c.name, t)} />
             {c.value_text && !/^-?\d+(\.\d+)?$/.test(c.value_text.trim()) && <span className="param-computed">= {c.value}</span>}
-          </span>
+          </>
         )}
-        {conflict && <span className="badge err">conflict</span>}
-        {redundant && <span className="badge warn">redundant</span>}
-      </td>
-      <td>{!ro && <button className="btn-small danger" onClick={() => deleteConstraint(c.name)} title="delete constraint">×</button>}</td>
-    </tr>
+      </span>
+      <span>{!ro && <button className="btn-small danger" onClick={() => deleteConstraint(c.name)} title="delete constraint">×</button>}</span>
+    </div>
   );
 }
 
 const NUMERIC: Record<string, string[]> = { circle: ['diameter'], rect: ['width', 'height'], slot: ['length', 'width', 'angle'], offset: ['distance'] };
 const POINTS: Record<string, string[]> = { point: ['at'], line: ['start', 'end'], arc: ['center', 'start', 'end'], circle: ['at'], rect: ['at'], slot: ['at'] };
 
+const fmtPt = (p: unknown) => (Array.isArray(p) ? `${p[0]}, ${p[1]}` : '');
+const cornerText = (v: unknown) => (typeof v === 'number' ? String(v) : v && typeof v === 'object' ? Object.entries(v as Record<string, number>).map(([k, r]) => `${k} ${r}`).join(' ') : '');
+
+/** One line that says what an entity is, for its collapsed row. */
+function entitySummary(e: Entity): string {
+  const a = e.args;
+  switch (e.kind) {
+    case 'point': return fmtPt(a.at);
+    case 'line': return `${fmtPt(a.start)} → ${fmtPt(a.end)}`;
+    case 'arc': return `about ${fmtPt(a.center)}`;
+    case 'circle': return `Ø${a.diameter} at ${fmtPt(a.at)}`;
+    case 'rect': return `${a.width} × ${a.height} at ${fmtPt(a.at)}${a.corners ? ` · R ${cornerText(a.corners)}` : ''}${a.chamfers ? ` · chamfer ${cornerText(a.chamfers)}` : ''}`;
+    case 'slot': return `${a.length} × ${a.width} at ${fmtPt(a.at)}${a.angle ? ` · ${a.angle}°` : ''}`;
+    case 'polygon': return `${(a.points as number[][]).length} points${a.corners ? ` · R ${cornerText(a.corners)}` : ''}${a.chamfers ? ` · chamfer ${cornerText(a.chamfers)}` : ''}`;
+    case 'project': return e.arg_texts?.selector ?? 'converted';
+    case 'offset': return `of ${(a.of as string[]).join(', ')} · ${a.distance} ${a.side ?? 'outside'}`;
+    default: return '';
+  }
+}
+
+/** An entity: one line collapsed, its arguments as label-and-field pairs when it is selected in
+ * the sketch or opened by a click. Hovering lights the entity. */
 function EntityRow({ sketch, e, ro, inSketch }: { sketch: string; e: Entity; ro: boolean; inSketch: boolean }) {
   const selection = useStore((s) => s.sketchMode?.selection ?? null);
+  const [opened, setOpened] = useState(false);
   const set = (kwarg: string, value: EditValue) => edit({ op: 'set_entity_argument', sketch, entity: e.name, kwarg, value });
   const del = () => edit({ op: 'delete_sketch_entity', sketch, entity: e.name });
   const fields = NUMERIC[e.kind] ?? [];
   const pts = POINTS[e.kind] ?? [];
-  // inside the sketch the row follows the viewport's selection: lit when selected, a click selects, hovering lights the entity
   const selected = inSketch && !!selection?.some((r) => r === e.name || r.startsWith(`${e.name}.`));
-  const ref = useRef<HTMLTableRowElement>(null);
+  const open = inSketch ? selected : opened;
+  const ref = useRef<HTMLDivElement>(null);
   useEffect(() => { if (selected) ref.current?.scrollIntoView({ block: 'nearest' }); }, [selected]);
   const onClick = (ev: React.MouseEvent) => {
-    if (!inSketch || (ev.target as HTMLElement).closest('input, select, button')) return;
-    toggleSketchSelect(e.name, ev.shiftKey || ev.ctrlKey || ev.metaKey);
+    if ((ev.target as HTMLElement).closest('input, select, button')) return;
+    if (inSketch) toggleSketchSelect(e.name, ev.shiftKey || ev.ctrlKey || ev.metaKey);
+    else setOpened((o) => !o);
   };
   return (
-    <tr ref={ref} className={`entity-row ${inSketch ? 'clickable' : ''} ${selected ? 'selected' : ''}`} data-testid={`entity-${e.name}`} onClick={onClick}
-        onMouseEnter={() => inSketch && setSketchHighlight([e.name])} onMouseLeave={() => inSketch && setSketchHighlight([])}>
-      <td className="entity-kind">{e.kind}</td>
-      <td className="entity-name">{e.name}{e.construction ? ' (c)' : ''}</td>
-      <td className="entity-fields">
-        {fields.map((k) => <ExprField key={k} label={k} text={e.arg_texts?.[k] ?? String(e.args[k] ?? '')} disabled={ro} onCommit={(v) => set(k, v)} />)}
-        {pts.map((k) => e.args[k] ? <PointField key={k} label={k} value={e.args[k] as [number, number]} disabled={ro} onCommit={(v) => set(k, v)} /> : null)}
-        {e.kind === 'polygon' && <span className="panel-help">{(e.args.points as number[][]).length} points</span>}
-        {e.kind === 'project' && <span className="mono refs">{e.arg_texts?.selector ?? 'converted'}</span>}
-        {e.kind === 'offset' && (
-          <>
-            <span className="mono refs">of {(e.args.of as string[]).join(', ')}</span>
-            <label className="field inline"><span>side</span>
-              <select value={String(e.args.side ?? 'outside')} disabled={ro} onChange={(ev) => set('side', ev.target.value)}>
-                {['outside', 'inside', 'left', 'right'].map((o) => <option key={o} value={o}>{o}</option>)}
-              </select>
-            </label>
-            <label className="field inline"><span>corners</span>
-              <select value={String(e.args.corners ?? 'sharp')} disabled={ro} onChange={(ev) => set('corners', ev.target.value)}>
-                <option value="sharp">sharp</option><option value="round">round</option>
-              </select>
-            </label>
-          </>
-        )}
-      </td>
-      <td>{!ro && <button className="btn-small danger" onClick={del} title="delete entity">×</button>}</td>
-    </tr>
+    <div ref={ref} className={`ent-row clickable ${selected ? 'selected' : ''} ${open ? 'open' : ''}`} data-testid={`entity-${e.name}`} onClick={onClick}
+         onMouseEnter={() => inSketch && setSketchHighlight([e.name])} onMouseLeave={() => inSketch && setSketchHighlight([])}>
+      <span className="ent-kind">{e.kind}{e.construction ? ' (c)' : ''}</span>
+      <span className="ent-name">{e.name}</span>
+      {!open && <span className="ent-summary">{entitySummary(e)}</span>}
+      {open && <span />}
+      <span>{!ro && <button className="btn-small danger" onClick={del} title="delete entity">×</button>}</span>
+      {open && (
+        <div className="ent-args">
+          {fields.map((k) => <ExprField key={k} label={k} text={e.arg_texts?.[k] ?? String(e.args[k] ?? '')} disabled={ro} onCommit={(v) => set(k, v)} />)}
+          {pts.map((k) => e.args[k] ? <PointField key={k} label={k} value={e.args[k] as [number, number]} disabled={ro} onCommit={(v) => set(k, v)} /> : null)}
+          {e.kind === 'polygon' && <span className="panel-help">{(e.args.points as number[][]).length} points</span>}
+          {(e.kind === 'rect' || e.kind === 'polygon') && (e.args.corners || e.args.chamfers) ? (
+            <span className="panel-help">{e.args.corners ? `corners ${cornerText(e.args.corners)}` : ''}{e.args.corners && e.args.chamfers ? ' · ' : ''}{e.args.chamfers ? `chamfers ${cornerText(e.args.chamfers)}` : ''}</span>
+          ) : null}
+          {e.kind === 'project' && <span className="mono refs">{e.arg_texts?.selector ?? 'converted'}</span>}
+          {e.kind === 'offset' && (
+            <>
+              <span className="mono refs">of {(e.args.of as string[]).join(', ')}</span>
+              <label className="field inline"><span>side</span>
+                <select value={String(e.args.side ?? 'outside')} disabled={ro} onChange={(ev) => set('side', ev.target.value)}>
+                  {['outside', 'inside', 'left', 'right'].map((o) => <option key={o} value={o}>{o}</option>)}
+                </select>
+              </label>
+              <label className="field inline"><span>corners</span>
+                <select value={String(e.args.corners ?? 'sharp')} disabled={ro} onChange={(ev) => set('corners', ev.target.value)}>
+                  <option value="sharp">sharp</option><option value="round">round</option>
+                </select>
+              </label>
+            </>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
