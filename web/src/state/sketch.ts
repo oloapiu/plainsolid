@@ -5,7 +5,7 @@ import { edit } from './documents';
 import { fetchGhost } from './geometry';
 import { featureByName, featurePreviews, nextName, selectorTarget, setStatus, setUpto } from './tools';
 import type { EditOp, Feature, JsonValue, PickedEntity, PlaneInfo, SketchSolution, Tree } from '../api/types';
-import type { DimLock } from '../sketch/model';
+import type { Corner, DimLock } from '../sketch/model';
 import type { SketchMode, SketchTool } from './core';
 
 // ---- sketch mode -------------------------------------------------------------
@@ -59,7 +59,7 @@ export function enterSketch(feature: Feature) {
   const offset = Number(feature.args.offset ?? 0);
   set({
     sketchMode: { sketch: feature.name, plane, offset, frame, construction: false, tool: null, selection: [], bodySelection: [], hover: null, highlight: [], preview: null,
-                  dragging: null, locked: false, solveMs: null, dimLock: null, dimEditing: null },
+                  dragging: null, locked: false, solveMs: null, dimLock: null, cornerAsk: null, dimEditing: null },
     selected: feature.name, selectedFace: null, tool: 'none', planeDialog: null, featureDialog: null, dialogPicks: [], pickRequest: null,
     orthoBeforeSketch: state.ortho, ortho: true, ghostMesh: null,
   });
@@ -170,6 +170,32 @@ export function setDimEditing(name: string | null) { patchSketch({ dimEditing: n
 /** The dimension tool: on until stopped, it dimensions the selection (its picks) and stays on after each placement. */
 export function startDimension() { patchSketch({ tool: 'dimension', dimLock: null, hover: null }); }
 export function setDimLock(lock: DimLock) { patchSketch({ dimLock: lock }); }
+
+/** Ask the radius (or setback) for these corners: the overlay shows a value box at `at`. */
+export function askCorner(what: 'fillet' | 'chamfer', corners: Corner[], at: [number, number]) {
+  patchSketch({ cornerAsk: { what, corners, at }, tool: null });
+}
+
+export function cancelCornerAsk() { patchSketch({ cornerAsk: null }); }
+
+/** Fillet or chamfer corners at one size: the server composes the arcs, relations, sharps and dimension as one edit. */
+export async function filletCorners(what: 'fillet' | 'chamfer', corners: Corner[], size: number): Promise<boolean> {
+  const sm = state.sketchMode;
+  if (!sm) return false;
+  patchSketch({ cornerAsk: null });
+  const ok = await edit({ op: 'fillet_corners', sketch: sm.sketch, corners: corners as unknown as Record<string, string>[], size, kind: what });
+  if (ok) { setStatus(`${what === 'fillet' ? 'filleted' : 'chamfered'} ${corners.length} corner${corners.length === 1 ? '' : 's'} at ${size}`); patchSketch({ selection: [] }); }
+  return ok;
+}
+
+/** Take a fillet or chamfer apart again. */
+export async function unfillet(entity: string): Promise<boolean> {
+  const sm = state.sketchMode;
+  if (!sm) return false;
+  const ok = await edit({ op: 'unfillet', sketch: sm.sketch, entity });
+  if (ok) { setStatus(`removed ${entity}`); patchSketch({ selection: [] }); }
+  return ok;
+}
 
 /** Move a dimension's label: the at= keyword on its statement, one undo step. */
 export async function placeDimensionLabel(name: string, p: [number, number]) {

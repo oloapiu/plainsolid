@@ -4,7 +4,7 @@ import {
   expressionNames, setSketchHighlight, deleteConstraint, setConstraintValue, unknownNames, setError, deleteFeature, openFeatureDialog, setSuppressed,
   fixInstance, fetchAssemblyQueries, fmt, makeEditable, openDocument, isDrawing, exportDocument, modelDocPath, setMeta,
   setOverlay, isViewer, setDeleteConfirm, fetchSummary, toggleSketchSelect, hoverRefs,
-  addConstraint, startDimension, toggleConstructionSelection, setSketchTool, deleteSketchSelection, convertBodySelection, toggleBodySelect,
+  addConstraint, startDimension, toggleConstructionSelection, setSketchTool, deleteSketchSelection, convertBodySelection, toggleBodySelect, askCorner, unfillet,
 } from '../state/store';
 import { ParamPanel } from '../params/ParamPanel';
 import { PlaneDialog } from './PlaneDialog';
@@ -12,7 +12,7 @@ import { FeatureDialog } from './FeatureDialog';
 import { MATE_KINDS, TOOL_KINDS, VIEW_DIRECTIONS, DIMENSION_KINDS, type CompareRegion, type Constraint, type Entity, type Feature, type EditValue, type Overlay, type Tree } from '../api/types';
 import { MeasurePanel } from './MeasurePanel';
 import { ExprInput } from './ExprInput';
-import { GLYPH, buildModel, validConstraints, dimensionFor, entityOf, refKind, isBuiltin } from '../sketch/model';
+import { GLYPH, buildModel, validConstraints, dimensionFor, entityOf, refKind, isBuiltin, cornersOf, removableCut, handleAt } from '../sketch/model';
 import { subAssemblyOf, openSubAssembly } from '../menu/entries';
 
 function parseValue(text: string): EditValue {
@@ -781,6 +781,9 @@ function SketchSelected({ f }: { f: Feature }) {
   const allConstruction = ents.length > 0 && ents.every((e) => e!.construction);
   const curves = sel.filter((r) => refKind(model, r) !== 'point' && !r.endsWith('.axis') && !isBuiltin(r));
   const deletable = !sel.every(isBuiltin);
+  const corners = sel.length ? cornersOf(model, sel) : null;
+  const cornerAt = (): [number, number] => { const c = corners![0]; const p = 'entity' in c ? handleAt(model, `${c.entity}.${c.corner}`) : handleAt(model, c.a); return p ?? [0, 0]; };
+  const cut = sel.length === 1 ? removableCut(model, sel[0]) : null;
   return (
     <div className="sketch-selected" data-testid="sketch-selected">
       {sel.length > 0 && (
@@ -798,6 +801,9 @@ function SketchSelected({ f }: { f: Feature }) {
               <button className={`btn-small ${allConstruction ? 'active' : ''}`} data-testid="constrain-construction" onClick={() => void toggleConstructionSelection()}
                       title={allConstruction ? 'make profile geometry' : 'make construction geometry'}>construction</button>
             )}
+            {corners && <button className="btn-small" data-testid="sketch-fillet" title="round the corner: type the radius" onClick={() => askCorner('fillet', corners, cornerAt())}>fillet…</button>}
+            {corners && <button className="btn-small" data-testid="sketch-chamfer" title="bevel the corner: type the setback" onClick={() => askCorner('chamfer', corners, cornerAt())}>chamfer…</button>}
+            {cut && <button className="btn-small" data-testid="sketch-unfillet" onClick={() => void unfillet(cut.entity)}>remove the {cut.what}</button>}
             {curves.length > 0 && <button className="btn-small" data-testid="sketch-offset" title="offset the selected curves: click the side, then type the distance" onClick={() => setSketchTool('offset')}>offset…</button>}
             {deletable && <button className="btn-small danger" onClick={() => void deleteSketchSelection()} title="delete the selected entities (del)">delete</button>}
             <button className="btn-small" onClick={() => toggleSketchSelect(null, false)}>clear</button>

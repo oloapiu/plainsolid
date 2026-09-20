@@ -29,6 +29,8 @@ export {
 export { fetchAssemblyQueries, fetchSummary, installedSectionMatches, setOverlay } from './geometry';
 export {
   addConstraint,
+  askCorner,
+  cancelCornerAsk,
   cancelDragPreview,
   convertBodySelection,
   deleteConstraint,
@@ -37,6 +39,7 @@ export {
   exitSketch,
   expressionNames,
   expressionValue,
+  filletCorners,
   placeDimensionLabel,
   planeLabelOf,
   previewDrag,
@@ -59,6 +62,7 @@ export {
   toggleConstructionMode,
   toggleConstructionSelection,
   toggleSketchSelect,
+  unfillet,
   unknownNames,
   useBodyInRelation,
 } from './sketch';

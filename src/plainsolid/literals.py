@@ -27,4 +27,6 @@ def python_literal(value: Any) -> str:
         return "[" + content + "]"
     if value is None:
         return "None"
+    if isinstance(value, dict) and "expr" not in value and all(isinstance(k, str) for k in value):  # corners={"tl": 8}
+        return "{" + ", ".join(f"{python_literal(k)}: {python_literal(v)}" for k, v in value.items()) + "}"
     raise ValueError(f"cannot write {value!r} into source")

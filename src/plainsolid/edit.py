@@ -123,6 +123,8 @@ KIND_DEFAULTS = {
     # sketch dimensions: the label's place and the distance/angle options
     **{(k, "at"): ("None",) for k in ("distance", "length", "diameter", "radius", "angle")},
     ("distance", "along"): ("None",), ("angle", "reverse"): ("False",),
+    # macro corners: none rounded, none bevelled
+    **{(k, arg): ("None", "0", "0.0", "{}") for k in ("rect", "polygon") for arg in ("corners", "chamfers")},
 }
 
 
@@ -667,8 +669,11 @@ def write_back(src: str, sketch_name: str, coords: dict[str, dict[str, Any]], pr
                     args[j] = a.with_changes(value=a.value.with_changes(elements=elements))
                     changed = True
                 continue
-            new = _rewrite_point(a.value, value, precision) if isinstance(value, (tuple, list)) \
-                else _rewrite_number(a.value, value, precision)
+            if key in ("corners", "chamfers"):
+                new = _rewrite_corners(a.value, value, precision)
+            else:
+                new = _rewrite_point(a.value, value, precision) if isinstance(value, (tuple, list)) \
+                    else _rewrite_number(a.value, value, precision)
             if new is not None:
                 args[j] = a.with_changes(value=new)
                 changed = True
@@ -676,6 +681,30 @@ def write_back(src: str, sketch_name: str, coords: dict[str, dict[str, Any]], pr
             body[i] = _replace_call(module.body[i], call.with_changes(args=args))
             changed_any = True
     return module.with_changes(body=body).code if changed_any else src
+
+
+def _rewrite_corners(node: cst.BaseExpression, value: Any, precision: int) -> cst.BaseExpression | None:
+    """corners= written back: a number stays a number while the solver reports one, a dict has
+    each corner's literal rewritten, and the form switches when the radii stop agreeing."""
+    if isinstance(value, (int, float)):
+        return _rewrite_number(node, float(value), precision) if not isinstance(node, cst.Dict) \
+            else cst.parse_expression(_num_text(float(value), precision))
+    if not isinstance(value, dict):
+        return None
+    if not isinstance(node, cst.Dict):
+        return cst.parse_expression(python_literal({k: round(float(v), precision) for k, v in value.items()}))
+    changed = False
+    elements = list(node.elements)
+    for i, el in enumerate(elements):
+        if not isinstance(el, cst.DictElement) or not isinstance(el.key, cst.SimpleString):
+            continue
+        k = el.key.evaluated_value
+        if k in value:
+            new = _rewrite_number(el.value, float(value[k]), precision)
+            if new is not None:
+                elements[i] = el.with_changes(value=new)
+                changed = True
+    return node.with_changes(elements=elements) if changed else None
 
 
 def _tuple_text(values, precision: int) -> str:

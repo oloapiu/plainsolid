@@ -23,6 +23,7 @@ from build123d import (
     Wire,
 )
 
+from .corners import macro_corner_points, macro_corners
 from .model import Entity, Feature
 from .solver.build import Projected
 
@@ -95,16 +96,22 @@ def _edges_and_faces(entities: list[Entity], coords, projected: dict[str, Projec
         elif e.kind == "rect":
             if a["width"] <= 0 or a["height"] <= 0:
                 raise SketchError(f"rect {e.name!r} needs positive width and height")
-            faces.extend(_at(Rectangle(a["width"], a["height"]), a["at"]).faces())
+            if a.get("corners") or a.get("chamfers"):
+                faces.append(Face(Wire(_macro_outline(e, a))))
+            else:
+                faces.extend(_at(Rectangle(a["width"], a["height"]), a["at"]).faces())
         elif e.kind == "slot":
             if a["length"] <= a["width"] or a["width"] <= 0:
                 raise SketchError(f"slot {e.name!r} needs length greater than width, both positive")
             faces.extend(_at(SlotOverall(a["length"], a["width"], rotation=a["angle"]), a["at"]).faces())
         elif e.kind == "polygon":
-            pts = [(x, y, 0) for x, y in a["points"]]
-            if pts[0] != pts[-1]:
-                pts.append(pts[0])
-            faces.extend(Polygon(*pts).faces())
+            if a.get("corners") or a.get("chamfers"):
+                faces.append(Face(Wire(_macro_outline(e, a))))
+            else:
+                pts = [(x, y, 0) for x, y in a["points"]]
+                if pts[0] != pts[-1]:
+                    pts.append(pts[0])
+                faces.extend(Polygon(*pts).faces())
         elif e.kind in ("project", "offset"):
             pr = projected.get(e.name)
             if pr is None:
@@ -120,6 +127,38 @@ def _edges_and_faces(entities: list[Entity], coords, projected: dict[str, Projec
         else:
             raise SketchError(f"unknown entity kind {e.kind!r}")
     return edges, faces
+
+
+def _macro_outline(e: Entity, a: dict[str, Any]) -> list[Edge]:
+    """The outline of a rect or polygon with rounded or bevelled corners: sides cut back to
+    the tangent points, arcs and chamfer lines between them, as (edge, label) pairs' edges."""
+    return [edge for edge, _ in _macro_outline_labelled(e, a)]
+
+
+def _macro_outline_labelled(e: Entity, a: dict[str, Any]) -> list[tuple[Edge, str]]:
+    n = e.name
+    try:
+        cuts = macro_corners(e.kind, a, f"{e.kind} {n!r}")
+    except ValueError as exc:
+        raise SketchError(str(exc)) from None
+    pts = macro_corner_points(e.kind, a)
+    count = len(pts)
+    side_label = (lambda i: f"{n}.{('bottom', 'right', 'top', 'left')[i]}") if e.kind == "rect" else (lambda i: f"{n}.e{i}")
+    out: list[tuple[Edge, str]] = []
+    for i, (name, p) in enumerate(pts):
+        nxt_name, q = pts[(i + 1) % count]
+        start = cuts[name]["t2"] if name in cuts else p
+        end = cuts[nxt_name]["t1"] if nxt_name in cuts else q
+        if math.hypot(end[0] - start[0], end[1] - start[1]) > 1e-9:
+            out.append((Edge.make_line((*start, 0), (*end, 0)), side_label(i)))
+        cut = cuts.get(nxt_name)
+        if cut is None:
+            continue
+        if cut["kind"] == "arc":
+            out.append((_arc_edge(cut["center"], cut["start"], cut["end"]), f"{n}.{nxt_name}_arc"))
+        else:
+            out.append((Edge.make_line((*cut["t1"], 0), (*cut["t2"], 0)), f"{n}.{nxt_name}_chamfer"))
+    return out
 
 
 def _faces_2d(entities: list[Entity], coords=None, projected: dict[str, Projected] | None = None) -> list[Face]:
@@ -200,6 +239,8 @@ def profile_edges(feature: Feature, coords=None, projected: dict[str, Projected]
                 out.append((_arc_edge(a["center"], a["start"], a["end"]), n))
             elif e.kind == "circle":
                 out.append((_circle_edge(a["at"], a["diameter"] / 2), n))
+            elif e.kind == "rect" and (a.get("corners") or a.get("chamfers")):
+                out += _macro_outline_labelled(e, a)
             elif e.kind == "rect":
                 cx, cy = a["at"]
                 w, h = a["width"] / 2, a["height"] / 2
@@ -218,6 +259,8 @@ def profile_edges(feature: Feature, coords=None, projected: dict[str, Projected]
                         (line((px - vx * r, py - vy * r), (qx - vx * r, qy - vy * r)), f"{n}.bottom"),
                         (_arc_edge((px, py), (px + vx * r, py + vy * r), (px - vx * r, py - vy * r)), f"{n}.start_arc"),
                         (_arc_edge((qx, qy), (qx - vx * r, qy - vy * r), (qx + vx * r, qy + vy * r)), f"{n}.end_arc")]
+            elif e.kind == "polygon" and (a.get("corners") or a.get("chamfers")):
+                out += _macro_outline_labelled(e, a)
             elif e.kind == "polygon":
                 pts = a["points"]
                 for i, pt in enumerate(pts):

@@ -7,13 +7,15 @@ import { refAnchor, GLYPH, dimText, type SketchModel, type Pt } from './model';
 import { toWorld } from './draw';
 import { ExprInput } from '../panel/ExprInput';
 
-export function SketchLabels({ scene, frame, model, texts, onDragLabel, tick }: {
+export function SketchLabels({ scene, frame, model, texts, onDragLabel, tick, passthrough }: {
   scene: Scene3D; frame: PlaneFrame; model: SketchModel;
   /** Where each dimension's text sits, by constraint name (the overlay computes it with the dimension lines). */
   texts: Record<string, Pt>;
   /** A label being dragged: its name and the plane point under the cursor, null when the drag ends. */
   onDragLabel: (name: string, p: Pt | null) => void;
   tick: number;
+  /** Let the pointer through to the viewport (alt held: a drag orbits wherever it starts). */
+  passthrough?: boolean;
 }) {
   const sm = useStore((s) => s.sketchMode);
   const feature = sketchFeature();
@@ -43,7 +45,7 @@ export function SketchLabels({ scene, frame, model, texts, onDragLabel, tick }: 
                   conflict: model.solution?.conflicting?.includes(c.name) ?? false, redundant: model.solution?.redundant?.includes(c.name) ?? false });
   }
   // while a drawing tool or a drag is active the labels must not intercept the pointer
-  const passive = (sm.tool !== null && sm.tool !== 'dimension') || sm.dragging !== null;
+  const passive = (sm.tool !== null && sm.tool !== 'dimension') || sm.dragging !== null || Boolean(passthrough);
   return (
     <div className={`sketch-labels ${passive ? 'passive' : ''}`}>
       {glyphs.map((g) => (
@@ -67,7 +69,7 @@ function DimLabel({ name, kind, x, y, text, value, editing, names, refs, scene, 
   const shown = dimText(kind, value);
   const isExpr = !/^-?\d+(\.\d+)?$/.test(text.trim());
   const onDown = (e: React.PointerEvent) => {
-    if (editing) return;
+    if (editing || e.altKey || e.button !== 0) return;  // alt+drag orbits wherever it starts; other buttons are the viewport's
     e.stopPropagation();
     const el = e.currentTarget as HTMLElement;
     el.setPointerCapture(e.pointerId);

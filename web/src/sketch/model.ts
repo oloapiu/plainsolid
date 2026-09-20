@@ -44,6 +44,7 @@ export function buildModel(f: Feature, override?: Record<string, Record<string, 
   const handles: Handle[] = [];
   const curves: Curve[] = [];
   const entities = new Map<string, EntityInfo>();
+  const conflicting = new Set<string>();
   const H = (ref: string, entity: string, p: Pt, kind: Handle['kind']) => handles.push({ ref, entity, p, kind });
   const L = (ref: string, entity: string, a: Pt, b: Pt, decor = false) => curves.push({ ref, entity, kind: 'line', a, b, decor });
   // the built-ins first, so user geometry drawn later paints over them
@@ -81,7 +82,9 @@ export function buildModel(f: Feature, override?: Record<string, Record<string, 
         const c = pt(a.at), w = num(a.width) / 2, h = num(a.height) / 2;
         const tl: Pt = [c[0] - w, c[1] + h], tr: Pt = [c[0] + w, c[1] + h], bl: Pt = [c[0] - w, c[1] - h], br: Pt = [c[0] + w, c[1] - h];
         H(`${n}.center`, n, c, 'center'); H(`${n}.tl`, n, tl, 'corner'); H(`${n}.tr`, n, tr, 'corner'); H(`${n}.bl`, n, bl, 'corner'); H(`${n}.br`, n, br, 'corner');
-        L(`${n}.top`, n, tl, tr); L(`${n}.bottom`, n, bl, br); L(`${n}.left`, n, bl, tl); L(`${n}.right`, n, br, tr);
+        if (!macroOutline(handles, curves, conflicting, n, 'rect', a, ['bottom', 'right', 'top', 'left'])) {
+          L(`${n}.top`, n, tl, tr); L(`${n}.bottom`, n, bl, br); L(`${n}.left`, n, bl, tl); L(`${n}.right`, n, br, tr);
+        }
         break;
       }
       case 'slot': {
@@ -100,7 +103,9 @@ export function buildModel(f: Feature, override?: Record<string, Record<string, 
       case 'polygon': {
         const pts = (Array.isArray(a.points) ? a.points : []).map((p) => pt(p));
         pts.forEach((p, i) => H(`${n}.p${i}`, n, p, 'corner'));
-        pts.forEach((p, i) => L(`${n}.e${i}`, n, p, pts[(i + 1) % pts.length]));
+        if (!macroOutline(handles, curves, conflicting, n, 'polygon', a, pts.map((_, i) => `e${i}`))) {
+          pts.forEach((p, i) => L(`${n}.e${i}`, n, p, pts[(i + 1) % pts.length]));
+        }
         break;
       }
       case 'project':
@@ -113,9 +118,150 @@ export function buildModel(f: Feature, override?: Record<string, Record<string, 
     }
   }
   const constraints = f.constraints ?? [];
-  const conflicting = new Set<string>();
   for (const c of constraints) if (sol?.conflicting?.includes(c.name)) for (const r of c.refs) conflicting.add(entityOf(r));
   return { handles, curves, entities, free: new Set(sol?.free_entities ?? []), conflicting, constraints, solution: sol };
+}
+
+// ---- rounded and bevelled corners of rect and polygon macros (mirrors corners.py) ------------
+
+export const RECT_CORNERS = ['tl', 'tr', 'br', 'bl'] as const;
+
+/** `corners=8` or `corners={tl: 8}` as a size per corner. */
+export function cornerSpec(value: unknown, names: string[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  if (typeof value === 'number') { if (value > 0) for (const n of names) out[n] = value; return out; }
+  if (value && typeof value === 'object') for (const [k, v] of Object.entries(value as Record<string, unknown>)) if (names.includes(k) && typeof v === 'number' && v > 0) out[k] = v;
+  return out;
+}
+
+export interface CornerCut { kind: 'arc' | 'chamfer'; size: number; t: number; t1: Pt; t2: Pt; center?: Pt; start?: Pt; end?: Pt }
+
+/** The rounding or bevel at corner p between the sides towards prev and next: the cut points
+ * (t1 towards prev, t2 towards next), and for a radius the centre and the counter-clockwise arc.
+ * Null when it does not fit or the sides are colinear. */
+export function cornerGeometry(prev: Pt, p: Pt, next: Pt, radius?: number, chamfer?: number): CornerCut | null {
+  const unit = (v: Pt): Pt | null => { const n = Math.hypot(v[0], v[1]); return n < 1e-12 ? null : [v[0] / n, v[1] / n]; };
+  const u1 = unit([prev[0] - p[0], prev[1] - p[1]]), u2 = unit([next[0] - p[0], next[1] - p[1]]);
+  if (!u1 || !u2) return null;
+  const theta = Math.acos(Math.max(-1, Math.min(1, u1[0] * u2[0] + u1[1] * u2[1])));
+  if (theta < 1e-6 || theta > Math.PI - 1e-6) return null;
+  const l1 = Math.hypot(prev[0] - p[0], prev[1] - p[1]), l2 = Math.hypot(next[0] - p[0], next[1] - p[1]);
+  const t = radius !== undefined ? radius / Math.tan(theta / 2) : chamfer ?? 0;
+  if (t <= 0 || t > l1 + 1e-9 || t > l2 + 1e-9) return null;
+  const t1: Pt = [p[0] + t * u1[0], p[1] + t * u1[1]], t2: Pt = [p[0] + t * u2[0], p[1] + t * u2[1]];
+  if (radius === undefined) return { kind: 'chamfer', size: chamfer ?? 0, t, t1, t2 };
+  const bis = unit([u1[0] + u2[0], u1[1] + u2[1]])!;
+  const dist = radius / Math.sin(theta / 2);
+  const center: Pt = [p[0] + dist * bis[0], p[1] + dist * bis[1]];
+  const cross = (t1[0] - center[0]) * (t2[1] - center[1]) - (t1[1] - center[1]) * (t2[0] - center[0]);
+  return { kind: 'arc', size: radius, t, t1, t2, center, start: cross > 0 ? t1 : t2, end: cross > 0 ? t2 : t1 };
+}
+
+/** The corners of a rect (counter-clockwise) or polygon (as given), each with its name. */
+export function macroCornerPoints(kind: string, a: Record<string, unknown>): [string, Pt][] {
+  if (kind === 'rect') {
+    const c = pt(a.at), w = num(a.width) / 2, h = num(a.height) / 2;
+    return [['bl', [c[0] - w, c[1] - h]], ['br', [c[0] + w, c[1] - h]], ['tr', [c[0] + w, c[1] + h]], ['tl', [c[0] - w, c[1] + h]]];
+  }
+  if (kind === 'polygon') return (Array.isArray(a.points) ? a.points : []).map((p, i) => [`p${i}`, pt(p)] as [string, Pt]);
+  return [];
+}
+
+/** Every cut corner of a macro with its geometry, or null when one does not fit. */
+export function macroCorners(kind: string, a: Record<string, unknown>): Record<string, CornerCut> | null {
+  const pts = macroCornerPoints(kind, a);
+  const names = pts.map(([n]) => n);
+  const radii = cornerSpec(a.corners, names), bevels = cornerSpec(a.chamfers, names);
+  const out: Record<string, CornerCut> = {};
+  const count = pts.length;
+  for (let i = 0; i < count; i++) {
+    const [name, p] = pts[i];
+    const r = radii[name], d = bevels[name];
+    if (r === undefined && d === undefined) continue;
+    const g = cornerGeometry(pts[(i + count - 1) % count][1], p, pts[(i + 1) % count][1], r, r === undefined ? d : undefined);
+    if (!g) return null;
+    out[name] = g;
+  }
+  for (let i = 0; i < count; i++) {
+    const a1 = out[pts[i][0]], b1 = out[pts[(i + 1) % count][0]];
+    if (a1 && b1) { const q = pts[(i + 1) % count][1], p = pts[i][1]; if (a1.t + b1.t > Math.hypot(q[0] - p[0], q[1] - p[1]) + 1e-9) return null; }
+  }
+  return out;
+}
+
+/** The outline of a macro with cut corners into the model: trimmed sides, arcs, chamfer lines
+ * and their handles. False when it has no cuts (the caller draws the plain macro), true when
+ * drawn; a misfit draws the sharp macro and flags the entity. */
+function macroOutline(handles: Handle[], curves: Curve[], conflicting: Set<string>, n: string, kind: string, a: Record<string, unknown>, sides: string[]): boolean {
+  if (!a.corners && !a.chamfers) return false;
+  const cuts = macroCorners(kind, a);
+  if (!cuts) { conflicting.add(n); return false; }
+  const pts = macroCornerPoints(kind, a);
+  const count = pts.length;
+  for (let i = 0; i < count; i++) {
+    const [name, p] = pts[i], [nextName, q] = pts[(i + 1) % count];
+    const start = cuts[name]?.t2 ?? p, end = cuts[nextName]?.t1 ?? q;
+    if (Math.hypot(end[0] - start[0], end[1] - start[1]) > 1e-9) curves.push({ ref: `${n}.${sides[i]}`, entity: n, kind: 'line', a: start, b: end });
+    const cut = cuts[nextName];
+    if (!cut) continue;
+    if (cut.kind === 'arc') {
+      const ref = `${n}.${nextName}_arc`, c = cut.center!, s = cut.start!, e = cut.end!;
+      handles.push({ ref: `${ref}.center`, entity: n, p: c, kind: 'center' }, { ref: `${ref}.start`, entity: n, p: s, kind: 'end' }, { ref: `${ref}.end`, entity: n, p: e, kind: 'end' });
+      curves.push({ ref, entity: n, kind: 'arc', c, r: cut.size, a0: Math.atan2(s[1] - c[1], s[0] - c[0]), a1: Math.atan2(e[1] - c[1], e[0] - c[0]) });
+    } else {
+      const ref = `${n}.${nextName}_chamfer`;
+      handles.push({ ref: `${ref}.start`, entity: n, p: cut.t1, kind: 'end' }, { ref: `${ref}.end`, entity: n, p: cut.t2, kind: 'end' });
+      curves.push({ ref, entity: n, kind: 'line', a: cut.t1, b: cut.t2 });
+    }
+  }
+  return true;
+}
+
+// ---- corners to fillet, fillets to remove ----------------------------------------------
+
+export type Corner = { a: string; b: string } | { entity: string; corner: string };
+
+/** The corner a reference stands for: a macro's corner handle, or a line end that another
+ * line's end meets. Null for anything else. */
+export function cornerOf(m: SketchModel, ref: string): Corner | null {
+  const h = m.handles.find((x) => x.ref === ref);
+  if (!h) return null;
+  const info = m.entities.get(h.entity);
+  if (!info) return null;
+  const part = ref.slice(h.entity.length + 1);
+  if ((info.kind === 'rect' && (RECT_CORNERS as readonly string[]).includes(part)) || (info.kind === 'polygon' && /^p\d+$/.test(part))) return { entity: h.entity, corner: part };
+  if (info.kind !== 'line' || (part !== 'start' && part !== 'end')) return null;
+  const others = m.handles.filter((o) => o.entity !== h.entity && (o.kind === 'end') && m.entities.get(o.entity)?.kind === 'line' && Math.hypot(o.p[0] - h.p[0], o.p[1] - h.p[1]) < 1e-6);
+  return others.length === 1 ? { a: ref, b: others[0].ref } : null;
+}
+
+/** The corners a selection stands for: corner handles, or exactly two lines meeting at one. Null when it is not all corners. */
+export function cornersOf(m: SketchModel, sel: string[]): Corner[] | null {
+  if (!sel.length) return null;
+  const kinds = sel.map((r) => refKind(m, r));
+  if (sel.length === 2 && kinds.every((k) => k === 'line')) {
+    const la = curveOf(m, sel[0]), lb = curveOf(m, sel[1]);
+    if (!la || !lb || la.kind !== 'line' || lb.kind !== 'line' || m.entities.get(la.entity)?.kind !== 'line' || m.entities.get(lb.entity)?.kind !== 'line') return null;
+    for (const [ea, pa] of [['start', la.a], ['end', la.b]] as const) for (const [eb, pb] of [['start', lb.a], ['end', lb.b]] as const) {
+      if (Math.hypot(pa[0] - pb[0], pa[1] - pb[1]) < 1e-6) return [{ a: `${sel[0]}.${ea}`, b: `${sel[1]}.${eb}` }];
+    }
+    return null;
+  }
+  const out: Corner[] = [];
+  for (const r of sel) { const c = cornerOf(m, r); if (!c) return null; out.push(c); }
+  return out;
+}
+
+/** A fillet or chamfer that can be removed: a macro's corner arc or chamfer by its reference, a
+ * line-pair arc or bevel by the name the fillet gave it. */
+export function removableCut(m: SketchModel, ref: string): { entity: string; what: 'fillet' | 'chamfer' } | null {
+  const c = curveOf(m, ref);
+  if (!c) return null;
+  const macro = /^([A-Za-z_][A-Za-z0-9_]*)\.[A-Za-z0-9_]+_(arc|chamfer)$/.exec(ref);
+  if (macro) return { entity: ref, what: macro[2] === 'arc' ? 'fillet' : 'chamfer' };
+  if (/^fillet\d+$/.test(c.entity) && c.kind === 'arc') return { entity: c.entity, what: 'fillet' };
+  if (/^chamfer\d+$/.test(c.entity) && c.kind === 'line') return { entity: c.entity, what: 'chamfer' };
+  return null;
 }
 
 function addProjected(handles: Handle[], curves: Curve[], entity: string, ref: string, it: ProjectedItem) {
@@ -305,8 +451,8 @@ export function dimensionFor(m: SketchModel, sel: string[], cursor?: Pt, lock: D
     if (isBuiltin(sel[0])) return null;
     const c = curveOf(m, sel[0]);
     const info = c ? m.entities.get(c.entity) : undefined;
-    // a side of a rect or a slot: the macro's own size
-    if (c && info && (info.kind === 'slot' || info.kind === 'rect')) {
+    // a side of a rect or a slot: the macro's own size (its corner arcs and chamfers are ordinary curves)
+    if (c && info && (info.kind === 'slot' || info.kind === 'rect') && /^(top|bottom|left|right|axis|start_arc|end_arc)$/.test(sel[0].slice(c.entity.length + 1))) {
       const n = c.entity, part = sel[0].slice(n.length + 1);
       const len = (ref: string) => { const l = curveOf(m, ref); return l && l.kind === 'line' ? Math.hypot(l.b[0] - l.a[0], l.b[1] - l.a[1]) : 0; };
       if (info.kind === 'rect') return part === 'left' || part === 'right' ? { kind: 'length', refs: [`${n}.height`], value: len(`${n}.left`) } : { kind: 'length', refs: [`${n}.width`], value: len(`${n}.top`) };

@@ -9,6 +9,7 @@ import contextvars
 import sys
 from typing import Any
 
+from .corners import RECT_CORNERS, corner_spec
 from .model import PLANES, Constraint, Document, Entity, Feature
 from .selectors import Query, Selector
 
@@ -197,6 +198,22 @@ def _pt(p) -> tuple[float, float]:
     return (float(x), float(y))
 
 
+def _corner_args(kind: str, name: str, corners: Any, chamfers: Any, names: tuple[str, ...]) -> dict[str, Any]:
+    """The corners= and chamfers= arguments of a macro, validated and kept as written."""
+    what = f"{kind} {name!r}"
+    radii = corner_spec(corners, names, f"{what}: corners")
+    bevels = corner_spec(chamfers, names, f"{what}: chamfers")
+    both = sorted(set(radii) & set(bevels))
+    if both:
+        raise ValueError(f"{what}: corner {both[0]!r} cannot be both rounded and chamfered")
+    out: dict[str, Any] = {}
+    if corners is not None:
+        out["corners"] = float(corners) if isinstance(corners, (int, float)) else {k: float(v) for k, v in corners.items()}
+    if chamfers is not None:
+        out["chamfers"] = float(chamfers) if isinstance(chamfers, (int, float)) else {k: float(v) for k, v in chamfers.items()}
+    return out
+
+
 def _at(at) -> dict[str, Any]:
     """The label placement option of a dimension, when given."""
     return {"at": _pt(at)} if at is not None else {}
@@ -242,19 +259,27 @@ class SketchHandle(FeatureHandle):
         """Counter-clockwise arc from start to end about center."""
         return self._add("arc", name, {"center": _pt(center), "start": _pt(start), "end": _pt(end)}, construction)
 
-    def rect(self, name: str, width: float, height: float, *, at=(0.0, 0.0), construction: bool = False) -> SketchHandle:
-        return self._add("rect", name, {"width": float(width), "height": float(height), "at": _pt(at)}, construction)
+    def rect(self, name: str, width: float, height: float, *, at=(0.0, 0.0), corners=None, chamfers=None,
+             construction: bool = False) -> SketchHandle:
+        """corners=8 rounds every corner, corners={"tl": 8} names them (tl, tr, br, bl);
+        chamfers= the same with a setback. The corner handles stay the sharp corners."""
+        args = {"width": float(width), "height": float(height), "at": _pt(at)}
+        args.update(_corner_args("rect", name, corners, chamfers, RECT_CORNERS))
+        return self._add("rect", name, args, construction)
 
     def slot(self, name: str, length: float, width: float, *, at=(0.0, 0.0), angle: float = 0.0,
              construction: bool = False) -> SketchHandle:
         return self._add("slot", name, {"length": float(length), "width": float(width), "at": _pt(at),
                                         "angle": float(angle)}, construction)
 
-    def polygon(self, name: str, points, *, construction: bool = False) -> SketchHandle:
+    def polygon(self, name: str, points, *, corners=None, chamfers=None, construction: bool = False) -> SketchHandle:
+        """corners={"p1": 5} rounds the corner at point 1, corners=5 every corner; chamfers= the same."""
         pts = [_pt(p) for p in points]
         if len(pts) < 3:
             raise ValueError("polygon needs at least three points")
-        return self._add("polygon", name, {"points": pts}, construction)
+        args: dict[str, Any] = {"points": pts}
+        args.update(_corner_args("polygon", name, corners, chamfers, tuple(f"p{i}" for i in range(len(pts)))))
+        return self._add("polygon", name, args, construction)
 
     def offset(self, name: str, of, distance: float, *, side: str = "outside", corners: str = "sharp",
                construction: bool = False) -> SketchHandle:

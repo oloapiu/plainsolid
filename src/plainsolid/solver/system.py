@@ -12,7 +12,7 @@ import math
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import ClassVar
+from typing import Any, ClassVar
 
 import numpy as np
 from scipy.optimize import least_squares
@@ -120,6 +120,35 @@ class PolarPoint(PointRef):
             jy[var] = jy.get(var, 0.0) + self.sign * dr * s
         jx[self.it] = jx.get(self.it, 0.0) - r * s
         jy[self.it] = jy.get(self.it, 0.0) + r * c
+        return (jx, jy)
+
+
+@dataclass
+class DerivedPoint(PointRef):
+    """A point computed from some variables by any function, differentiated numerically:
+    the centre and tangent points of a polygon corner's fillet, which depend on three
+    corners and the radius through a bisector."""
+
+    deps: list[int]
+    fn: Any  # (x) -> (px, py)
+
+    def pos(self, x):
+        px, py = self.fn(x)
+        return (float(px), float(py))
+
+    def jac(self, x):
+        jx: Row = {}
+        jy: Row = {}
+        h = 1e-6
+        xx = np.array(x, float)
+        for i in self.deps:
+            xx[i] = x[i] + h
+            px1, py1 = self.fn(xx)
+            xx[i] = x[i] - h
+            px0, py0 = self.fn(xx)
+            xx[i] = x[i]
+            jx[i] = (px1 - px0) / (2 * h)
+            jy[i] = (py1 - py0) / (2 * h)
         return (jx, jy)
 
 
@@ -504,6 +533,44 @@ class Tangent(Constraint):
     def jacobian(self, x):
         return [_add(_scale(_point_line(self.c.center, self.line, x)[1], self.sign),
                      _scale(self.c.radius.jac(x), -1))]
+
+
+@dataclass
+class TangentAt(Constraint):
+    """A line tangent to an arc at the arc's end that sits on it (a fillet): the radius vector
+    there is perpendicular to the line. The distance form has a vanishing gradient in that
+    configuration, a double root, and would count as redundant."""
+
+    name: str
+    line: LineRef
+    center: PointRef
+    at: PointRef
+
+    def _parts(self, x):
+        a, b = self.line.a.pos(x), self.line.b.pos(x)
+        d = _vsub(b, a)
+        n = _norm(d)
+        v = _vsub(self.center.pos(x), self.at.pos(x))
+        return d, n, v
+
+    def residual(self, x):
+        d, n, v = self._parts(x)
+        if n < 1e-12:
+            return [0.0]
+        return [_dot(v, d) / n]
+
+    def jacobian(self, x):
+        d, n, v = self._parts(x)
+        if n < 1e-12:
+            return [{}]
+        u = (d[0] / n, d[1] / n)
+        f = _dot(v, u)
+        w = ((v[0] - f * u[0]) / n, (v[1] - f * u[1]) / n)  # d(v . u)/d(b) with u = d/|d|
+        row = _chain(self.center, x, u[0], u[1])
+        row = _add(row, _chain(self.at, x, -u[0], -u[1]))
+        row = _add(row, _chain(self.line.b, x, w[0], w[1]))
+        row = _add(row, _chain(self.line.a, x, -w[0], -w[1]))
+        return [row]
 
 
 @dataclass

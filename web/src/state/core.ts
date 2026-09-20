@@ -19,7 +19,7 @@ import type {
   ViewSnapshot,
   ImportItem,
 } from '../api/types';
-import type { DimLock } from '../sketch/model';
+import type { Corner, DimLock } from '../sketch/model';
 
 export type Plane = 'XY' | 'XZ' | 'YZ';
 export type SketchTool = 'line' | 'circle' | 'arc' | 'rect' | 'slot' | 'polygon' | 'point' | 'dimension' | 'project' | 'offset' | null;
@@ -43,6 +43,7 @@ export interface SketchMode {
   locked: boolean;              // the last drag preview did not move the point
   solveMs: number | null;
   dimLock: DimLock;             // dimension tool: how a pair of points is measured, when locked from the menu
+  cornerAsk: { what: 'fillet' | 'chamfer'; corners: Corner[]; at: [number, number] } | null;  // a value box asking a fillet radius or chamfer setback
   dimEditing: string | null;    // constraint name whose value field is open
 }
 

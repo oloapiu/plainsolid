@@ -121,9 +121,9 @@ tree reports every sketch's frame as `result.plane` (`origin`, `x_dir`,
 | circle | `s.circle("c1", diameter, at=(x, y))` | `c1`, `c1.center` |
 | arc | `s.arc("a1", center, start, end)` counter-clockwise | `a1`, `a1.center`, `a1.start`, `a1.end` |
 | point | `s.point("p1", (x, y))` construction | `p1` |
-| rect | `s.rect("r1", width, height, at=(x, y))` | `r1.center`, `r1.top`, `r1.bottom`, `r1.left`, `r1.right`, corners `r1.tl`, `r1.tr`, `r1.bl`, `r1.br`, `r1.width`, `r1.height` |
+| rect | `s.rect("r1", width, height, at=(x, y), corners=8, chamfers={"bl": 3})` | `r1.center`, `r1.top`, `r1.bottom`, `r1.left`, `r1.right`, corners `r1.tl`, `r1.tr`, `r1.bl`, `r1.br`, `r1.width`, `r1.height`. `corners=8` rounds every corner, `corners={"tl": 8}` named ones, `chamfers=` bevels with a setback; the corner handles stay the sharp corners and the sides run sharp to sharp for relations, while each cut is a reference of its own, `r1.tl_arc` (`.center .start .end`) or `r1.bl_chamfer` (`.start .end`), taking radius, equal, concentric and tangent |
 | slot | `s.slot("s1", length, width, at=(x, y), angle=0)` | `s1.center`, `s1.start`, `s1.end`, `s1.axis`, `s1.start_arc`, `s1.end_arc`, `s1.length`, `s1.width` |
-| polygon | `s.polygon("p", [(x, y), ...])` | `p.p0`, `p.p1`, ... points, `p.e0`, `p.e1`, ... edges |
+| polygon | `s.polygon("p", [(x, y), ...], corners={"p1": 5})` | `p.p0`, `p.p1`, ... points, `p.e0`, `p.e1`, ... edges; `corners=` and `chamfers=` by point name as for rect, giving `p.p1_arc` and `p.p1_chamfer` |
 | project | `s.project("e1", body.edges.nearest((x, y, z)))` a body edge, vertex or face outline, fixed, follows the body; construction unless `construction=False` | `e1`, and `e1.start`, `e1.end`, `e1.center` as the geometry allows |
 | offset | `s.offset("o1", ["l1", "a1"], 2, side="outside"|"inside"|"left"|"right", corners="sharp"|"round")` | `o1.e0`, `o1.e1`, ... |
 

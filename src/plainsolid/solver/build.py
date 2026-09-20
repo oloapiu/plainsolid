@@ -7,6 +7,7 @@ from typing import Any
 
 import numpy as np
 
+from ..corners import RECT_CORNERS, RECT_SIGNS, corner_geometry, corner_spec
 from ..model import Constraint, Entity, Feature
 from . import system as S
 from .system import SketchError
@@ -157,6 +158,7 @@ def _add_entity(lay: Layout, e: Entity, projected: dict[str, Projected]) -> None
         lay.entity_vars[n] = [c.ix, c.iy, w, h]
         lay.name_vars(center=c, width=w, height=h)
         lay.extract[n] = lambda x, c=c, w=w, h=h: {"at": c.pos(x), "width": float(x[w]), "height": float(x[h])}
+        _rect_corners(lay, e, a, {"tl": tl, "tr": tr, "br": br, "bl": bl})
     elif e.kind == "slot":
         c = sy.point(*a["at"])
         L, W = sy.var(a["length"]), sy.var(a["width"])
@@ -181,6 +183,7 @@ def _add_entity(lay: Layout, e: Entity, projected: dict[str, Projected]) -> None
         lay.refs[n] = S.LineRef(pts[0], pts[1])
         lay.entity_vars[n] = [v for p in pts for v in (p.ix, p.iy)]
         lay.extract[n] = lambda x, pts=pts: {"points": [p.pos(x) for p in pts]}
+        _polygon_corners(lay, e, a, pts)
     elif e.kind in ("project", "offset"):
         pr = projected.get(n)
         if pr is None:
@@ -196,6 +199,96 @@ def _add_entity(lay: Layout, e: Entity, projected: dict[str, Projected]) -> None
     else:
         raise SketchError(f"unknown entity kind {e.kind!r}")
     lay.kinds[n] = e.kind
+
+
+def _corner_sizes(lay: Layout, e: Entity, a: dict, names: tuple[str, ...]) -> tuple[dict[str, int], dict[str, int]]:
+    """One variable per rounded or bevelled corner of a macro, registered on the entity and
+    written back as its corners= and chamfers= arguments."""
+    what = f"{e.kind} {e.name!r}"
+    radii = corner_spec(a.get("corners"), names, f"{what}: corners")
+    bevels = corner_spec(a.get("chamfers"), names, f"{what}: chamfers")
+    rv = {k: lay.system.var(v) for k, v in radii.items()}
+    dv = {k: lay.system.var(v) for k, v in bevels.items()}
+    for k, v in rv.items():
+        lay.entity_vars[e.name].append(v)
+        lay.var_names[v] = f"{k}_r"
+    for k, v in dv.items():
+        lay.entity_vars[e.name].append(v)
+        lay.var_names[v] = f"{k}_chamfer"
+    if rv or dv:
+        base = lay.extract[e.name]
+
+        def extract(x, base=base, rv=rv, dv=dv, was_r=a.get("corners"), was_d=a.get("chamfers")):
+            out = base(x)
+            if rv:
+                out["corners"] = _corner_form({k: float(x[v]) for k, v in rv.items()}, was_r)
+            if dv:
+                out["chamfers"] = _corner_form({k: float(x[v]) for k, v in dv.items()}, was_d)
+            return out
+        lay.extract[e.name] = extract
+    return rv, dv
+
+
+def _corner_form(values: dict[str, float], was: Any) -> Any:
+    """How corners are written back: the number form is kept while every corner agrees."""
+    if isinstance(was, (int, float)) and not isinstance(was, bool):
+        vs = list(values.values())
+        if all(abs(v - vs[0]) < 1e-9 for v in vs):
+            return vs[0]
+    return values
+
+
+def _rect_corners(lay: Layout, e: Entity, a: dict, corners: dict[str, S.PointRef]) -> None:
+    """Corner arcs and chamfers of a rect as derived references: the arc's centre and
+    tangent points are affine in the corner and its radius, so every relation works on them."""
+    n = e.name
+    rv, dv = _corner_sizes(lay, e, a, RECT_CORNERS)
+    for k, v in rv.items():
+        sx, sy_ = RECT_SIGNS[k]
+        corner = corners[k]
+        centre = S.AffinePoint(corner, [(v, -sx, -sy_)])
+        on_h = S.AffinePoint(corner, [(v, -sx, 0.0)])   # the tangent point on the top or bottom side
+        on_v = S.AffinePoint(corner, [(v, 0.0, -sy_)])  # the one on the left or right side
+        start, end = (on_h, on_v) if sx * sy_ < 0 else (on_v, on_h)  # counter-clockwise about the centre
+        lay.refs[f"{n}.{k}_arc"] = S.CircleRef(centre, S.FreeScalar(v))
+        lay.refs[f"{n}.{k}_arc.center"], lay.refs[f"{n}.{k}_arc.start"], lay.refs[f"{n}.{k}_arc.end"] = centre, start, end
+    for k, v in dv.items():
+        sx, sy_ = RECT_SIGNS[k]
+        corner = corners[k]
+        on_h = S.AffinePoint(corner, [(v, -sx, 0.0)])
+        on_v = S.AffinePoint(corner, [(v, 0.0, -sy_)])
+        start, end = (on_h, on_v) if sx * sy_ < 0 else (on_v, on_h)  # start towards the previous corner, walking counter-clockwise
+        lay.refs[f"{n}.{k}_chamfer"] = S.LineRef(start, end)
+        lay.refs[f"{n}.{k}_chamfer.start"], lay.refs[f"{n}.{k}_chamfer.end"] = start, end
+
+
+def _polygon_corners(lay: Layout, e: Entity, a: dict, pts: list[S.FreePoint]) -> None:
+    """Corner arcs and chamfers of a polygon: their points depend on three corners and the
+    size through a bisector, so they are derived numerically from the same geometry the
+    profile uses."""
+    n, count = e.name, len(pts)
+    names = tuple(f"p{i}" for i in range(count))
+    rv, dv = _corner_sizes(lay, e, a, names)
+
+    def derived(i: int, var: int, key: str, radius: bool) -> S.DerivedPoint:
+        prev, p, nxt = pts[i - 1], pts[i], pts[(i + 1) % count]
+        deps = [prev.ix, prev.iy, p.ix, p.iy, nxt.ix, nxt.iy, var]
+
+        def fn(x, prev=prev, p=p, nxt=nxt, var=var, key=key, radius=radius):
+            g = corner_geometry(prev.pos(x), p.pos(x), nxt.pos(x), **({"radius": float(x[var])} if radius else {"chamfer": float(x[var])}))
+            return g[key]
+        return S.DerivedPoint(deps, fn)
+
+    for k, v in rv.items():
+        i = int(k[1:])
+        centre, start, end = derived(i, v, "center", True), derived(i, v, "start", True), derived(i, v, "end", True)
+        lay.refs[f"{n}.{k}_arc"] = S.CircleRef(centre, S.FreeScalar(v))
+        lay.refs[f"{n}.{k}_arc.center"], lay.refs[f"{n}.{k}_arc.start"], lay.refs[f"{n}.{k}_arc.end"] = centre, start, end
+    for k, v in dv.items():
+        i = int(k[1:])
+        start, end = derived(i, v, "t1", False), derived(i, v, "t2", False)
+        lay.refs[f"{n}.{k}_chamfer"] = S.LineRef(start, end)
+        lay.refs[f"{n}.{k}_chamfer.start"], lay.refs[f"{n}.{k}_chamfer.end"] = start, end
 
 
 def _add_const_item(lay: Layout, name: str, item: ProjItem) -> None:
@@ -272,8 +365,12 @@ def _add_constraint(lay: Layout, c: Constraint, x0: np.ndarray) -> None:
         else:
             line_name, circ_name = (r[0], r[1]) if ka == "line" else (r[1], r[0])
             ln, ci = lay.line(line_name, what), lay.circle(circ_name, what)
-            sign = _sign(S._point_line(ci.center, ln, x0)[0])
-            sy.add(S.Tangent(c.name, ln, ci, sign))
+            end = _arc_end_on_line(lay, circ_name, ln, x0)
+            if end is not None:  # a fillet: the arc meets the line at its end, the radius there is perpendicular
+                sy.add(S.TangentAt(c.name, ln, ci.center, end))
+            else:
+                sign = _sign(S._point_line(ci.center, ln, x0)[0])
+                sy.add(S.Tangent(c.name, ln, ci, sign))
     elif k == "concentric":
         need(2)
         sy.add(S.Coincident(c.name, lay.circle(r[0], what).center, lay.circle(r[1], what).center))
@@ -336,6 +433,15 @@ def _add_constraint(lay: Layout, c: Constraint, x0: np.ndarray) -> None:
         raise SketchError(f"unknown constraint kind {k!r}")
 
 
+def _arc_end_on_line(lay: Layout, circ_name: str, ln: S.LineRef, x0: np.ndarray) -> S.PointRef | None:
+    """The end of an arc that lies on the line as the sketch stands, if any."""
+    for part in ("start", "end"):
+        p = lay.refs.get(f"{circ_name}.{part}")
+        if isinstance(p, S.PointRef) and abs(S._point_line(p, ln, x0)[0]) < 1e-4:
+            return p
+    return None
+
+
 def _on(lay: Layout, name: str, point: str, curve: str, what: str) -> None:
     p = lay.point(point, what)
     kc = lay.kind_of(curve)
@@ -355,6 +461,8 @@ def _fix_parts(lay: Layout, target: str, x0: np.ndarray, what: str) -> list[S.Co
     parts: list[S.Constraint] = []
     if kind in ("rect", "slot", "polygon", "arc", "line", "circle", "point") and "." not in target:
         for v in lay.entity_vars[target]:
+            if lay.var_names.get(v, "").endswith(("_r", "_chamfer")):
+                continue  # a macro's corner sizes are dimensioned, not pinned with its place and size
             parts.append(S.FixScalar(what, S.FreeScalar(v), float(x0[v])))
         return parts
     if isinstance(ref, S.PointRef):

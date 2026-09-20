@@ -4,14 +4,14 @@ import * as THREE from 'three';
 import { sceneRef } from '../viewport/Viewport';
 import { frameFromInfo, type PlaneFrame } from '../viewport/scene';
 import {
-  useStore, edit, hoverEntity, exitSketch, featureByName, nextName, setSketchTool, setStatus, setError, sketchBatch, sketchNames, toggleSketchSelect, setSketchHover, startDrag, previewDrag, endDrag, cancelDragPreview, addConstraint, startDimension, setDimLock, setSketchSelection, expressionNames, expressionValue, toggleConstructionMode, toggleConstructionSelection, type SketchTool, useBodyInRelation, selectorTarget, toggleBodySelect, convertBodySelection,
+  useStore, edit, hoverEntity, exitSketch, featureByName, nextName, setSketchTool, setStatus, setError, sketchBatch, sketchNames, toggleSketchSelect, setSketchHover, startDrag, previewDrag, endDrag, cancelDragPreview, addConstraint, startDimension, setDimLock, setSketchSelection, askCorner, cancelCornerAsk, filletCorners, unfillet, expressionNames, expressionValue, toggleConstructionMode, toggleConstructionSelection, type SketchTool, useBodyInRelation, selectorTarget, toggleBodySelect, convertBodySelection,
   openContextMenu, openFeatureDialog, deleteSketchSelection, getState, type MenuEntry,
 } from '../state/store';
 import { item, SEP } from '../menu/entries';
 import type { EditOp, JsonValue, PickedEntity } from '../api/types';
 import {
   buildModel, hitTest, dragTarget, validConstraints, dimensionFor, dimensionDrawing, labelOf, dimText, entityOf, fmtNum, type DimensionDrawing, type DimensionPlan, type Pt, type SketchModel, refKind, curvePointsOf,
-  curveOf, nearestOnCurve, CONSTRAINT_PREFIX, isBuiltin,
+  curveOf, nearestOnCurve, CONSTRAINT_PREFIX, isBuiltin, cornersOf, removableCut, handleAt,
 } from './model';
 import { drawModel, drawDimension, planeGrid, polyline, points, toWorld, disposeGroup, snap, round3, curvePoints, COLORS } from './draw';
 import { SketchLabels } from './SketchLabels';
@@ -44,7 +44,9 @@ export function SketchOverlay() {
   const [pending, setPending] = useState<Pending | null>(null);
   const [snapGlyph, setSnapGlyph] = useState<{ x: number; y: number; text: string; title: string } | null>(null);
   const [offsetDistance, setOffsetDistance] = useState('2');  // the last distance used, offered again
+  const [cornerSize, setCornerSize] = useState('2');  // the last fillet radius or chamfer setback, offered again
   const [dragLabel, setDragLabel] = useState<{ name: string; p: Pt } | null>(null);  // a dimension label on its way somewhere
+  const [altHeld, setAltHeld] = useState(false);  // alt+drag orbits wherever it starts: the labels let the pointer through
   const pointsRef = useRef<Snapped[]>([]);
   const preview = useRef<THREE.Object3D | null>(null);
   const group = useRef<THREE.Group | null>(null);
@@ -154,7 +156,7 @@ export function SketchOverlay() {
       return { p: [snap(u), snap(v)], ref: null };
     };
     void altKey;
-    const onMod = (e: KeyboardEvent) => { altKey = e.altKey; shiftKey = e.shiftKey; };
+    const onMod = (e: KeyboardEvent) => { altKey = e.altKey; shiftKey = e.shiftKey; setAltHeld(e.altKey); };
     // the arc a point sits at the end of, when the arc's tangent there runs within 10° of a direction
     const tangentArc = (s: Snapped, towards: Pt): string | null => {
       const m = modelRef.current;
@@ -399,6 +401,15 @@ export function SketchOverlay() {
         const plan = dimensionFor(m, sel);
         if (plan) out.push(item(`dimension (${plan.kind})`, () => startDimension(), { key: 'd' }));
         const edits: MenuEntry[] = [];
+        const corners = cornersOf(m, sel);
+        if (corners) {
+          const c0 = corners[0];
+          const at = ('entity' in c0 ? handleAt(m, `${c0.entity}.${c0.corner}`) : handleAt(m, c0.a)) ?? [u, v];
+          edits.push(item('fillet…', () => askCorner('fillet', corners, at), { title: 'round the corner: type the radius' }));
+          edits.push(item('chamfer…', () => askCorner('chamfer', corners, at), { title: 'bevel the corner: type the setback' }));
+        }
+        const cut = sel.length === 1 ? removableCut(m, sel[0]) : null;
+        if (cut) edits.push(item(`remove the ${cut.what}`, () => void unfillet(cut.entity)));
         const curves = sel.filter((r) => refKind(m, r) !== 'point' && !r.endsWith('.axis') && !isBuiltin(r));
         if (curves.length) edits.push(item('offset…', () => setSketchTool('offset'), { title: 'click the side to offset to, then type the distance' }));
         const ents = [...new Set(sel.map(entityOf))].map((n) => m.entities.get(n)).filter((e) => e && !e.projected && e.kind !== 'point');
@@ -453,6 +464,7 @@ export function SketchOverlay() {
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.closest('.cm-editor'))) return;
       if (e.key === 'Escape') {
         // never leaves the sketch: that is the exit button's job
+        if (getState().sketchMode?.cornerAsk) { cancelCornerAsk(); return; }
         if (pendingRef.current) { const p = pendingRef.current; setPending(null); if (p.kind === 'dimension') toggleSketchSelect(null, false); else setSketchTool(null); return; }
         if (pointsRef.current.length) { reset(); chainRef.current = null; }
         else if (tool === 'dimension' && picks.length) { toggleSketchSelect(null, false); }
@@ -584,8 +596,19 @@ export function SketchOverlay() {
         </div>
       ) : null}
       </div>
-      {scene && frame && model && <SketchLabels scene={scene} frame={frame} model={model} texts={dimTexts} onDragLabel={(name, p) => setDragLabel(p ? { name, p } : null)} tick={tick} />}
+      {scene && frame && model && <SketchLabels scene={scene} frame={frame} model={model} texts={dimTexts} onDragLabel={(name, p) => setDragLabel(p ? { name, p } : null)} tick={tick} passthrough={altHeld} />}
       {snapGlyph && sm.tool && <span className="snap-glyph" style={{ left: snapGlyph.x + 16, top: snapGlyph.y - 16 }} title={snapGlyph.title} data-testid="snap-glyph">{snapGlyph.text}</span>}
+      {sm.cornerAsk && scene && frame && (() => {
+        const [x, y] = scene.toScreen(toWorld(frame, sm.cornerAsk.at));
+        const ask = sm.cornerAsk;
+        const commit = (t: string) => { const v = Number(t.trim()); if (!Number.isFinite(v) || v <= 0) { setError(`${ask.what}: give a positive number`); return; } setCornerSize(t.trim()); void filletCorners(ask.what, ask.corners, v); };
+        return (
+          <div className="dim-label editing pending" style={{ left: x + 24, top: y - 18 }} data-testid="corner-pending">
+            <span className="dim-kind">{ask.what === 'fillet' ? 'R ' : 'chamfer '}</span>
+            <ExprInput text={cornerSize} names={[]} autoFocus commitUnchanged testId="corner-pending-input" onCommit={commit} onCancel={cancelCornerAsk} />
+          </div>
+        );
+      })()}
       {pending && pendingScreen && (
         <div className="dim-label editing pending" style={{ left: pendingScreen[0], top: pendingScreen[1] }} data-testid={pending.kind === 'offset' ? 'offset-pending' : 'dim-pending'}>
           {pending.kind === 'dimension' && pendingPlan

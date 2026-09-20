@@ -476,6 +476,33 @@ await page.waitForSelector('[data-testid=param-list]');
   await page.keyboard.press(process.platform === 'darwin' ? 'Meta+z' : 'Control+z');
   await waitHash(h);
 
+  // a fillet on the L's outer corner from the right-click menu: an arc with its relations, a virtual sharp, a radius dimension
+  await page.evaluate(() => window.__plainsolid.actions.setSketchSelection([]));
+  const solBefore = await profileSol();
+  const pc = await at(30, 0); await page.mouse.click(pc[0], pc[1], { button: 'right' });
+  await page.waitForSelector('[data-testid=ctx-fillet]', { timeout: 5000 });
+  await page.click('[data-testid=ctx-fillet]');
+  await page.waitForSelector('[data-testid=corner-pending-input]', { timeout: 5000 });
+  await page.fill('[data-testid=corner-pending-input]', '3');
+  h = (await st()).hash;
+  await page.locator('[data-testid=corner-pending-input]').press('Enter'); await waitHash(h);
+  const fsrc = readFile();
+  const fsol = await profileSol();
+  check('filleting a corner of two lines writes the arc, its tangencies, the virtual sharp and a radius dimension without moving the sketch',
+    /profile\.arc\("fillet1", /.test(fsrc) && /profile\.tangent\("t\d+", "fillet1", "(bottom|right)"\)/.test(fsrc) && /profile\.point\("sharp1", \(30, 0\)\)/.test(fsrc)
+      && /profile\.on\("on\d+", "sharp1", "bottom"\)/.test(fsrc) && /profile\.radius\("rad\d+", "fillet1", 3, at=/.test(fsrc) && /profile\.distance\("w", "bottom.start", "sharp1", width/.test(fsrc)
+      && fsol.dof === solBefore.dof && fsol.redundant.length === solBefore.redundant.length && !fsol.conflicting.length && (await page.locator('[data-testid=dim-rad1]').count()) === 1,
+    `dof ${fsol.dof} (was ${solBefore.dof}) redundant ${fsol.redundant} conflicting ${fsol.conflicting} · ${fsrc.match(/profile\.(arc|point|radius|distance)\("(fillet1|sharp1|rad1|w)".*/g)?.join(' | ')}`);
+  // and taking it apart again restores the corner (the panel's selected section offers it for the arc)
+  await page.evaluate(() => window.__plainsolid.actions.setSketchSelection(['fillet1']));
+  await page.waitForSelector('[data-testid=sketch-unfillet]', { timeout: 5000 });
+  h = (await st()).hash;
+  await page.click('[data-testid=sketch-unfillet]'); await waitHash(h);
+  const usrc = readFile();
+  check('removing the fillet deletes the arc and the sharp and joins the lines at the corner again',
+    !/fillet1|sharp1/.test(usrc) && /profile\.line\("bottom", \(-30, 0\), \(30, 0\)\)/.test(usrc) && /profile\.coincident\("c\d+", "bottom.end", "right.start"\)/.test(usrc) && (await profileSol()).dof === solBefore.dof,
+    usrc.match(/profile\.(line|coincident)\("(bottom|c\d+)".*/g)?.join(' | ') ?? '');
+
   // dragging a label writes its new place into the file
   const lb = await page.locator('[data-testid=dim-len1]').boundingBox();
   await page.mouse.move(lb.x + lb.width / 2, lb.y + lb.height / 2); await page.mouse.down();
@@ -1032,8 +1059,8 @@ check('new assembly creates an assembly file and an instance picked from the pro
   const vp3 = await page.locator('[data-testid=viewport] canvas').boundingBox();
   const camBefore = (await st()).camera;
   await page.keyboard.down('Alt');
-  await page.mouse.move(vp3.x + vp3.width * 0.7, vp3.y + vp3.height * 0.7);
-  await page.mouse.down(); await page.mouse.move(vp3.x + vp3.width * 0.5, vp3.y + vp3.height * 0.6, { steps: 8 }); await page.mouse.up();
+  await page.mouse.move(vp3.x + vp3.width * 0.15, vp3.y + vp3.height * 0.85);
+  await page.mouse.down(); await page.mouse.move(vp3.x + vp3.width * 0.4, vp3.y + vp3.height * 0.6, { steps: 8 }); await page.mouse.up();
   await page.keyboard.up('Alt');
   await page.waitForTimeout(300);
   const camRotated = (await st()).camera;

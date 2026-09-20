@@ -163,6 +163,25 @@ class SetConstraintArgument(Operation):
     value: JsonValue
 
 
+class FilletCorners(Operation):
+    """Round (or with kind chamfer, bevel) corners at one size: a corner is two line ends that
+    meet ({"a": "line1.end", "b": "line2.start"}) or a macro's corner ({"entity": "rect1",
+    "corner": "tl"}). The first gets a dimension, the others equal it."""
+    op: Literal["fillet_corners"]
+    sketch: str
+    corners: list[dict[str, str]] = Field(min_length=1)
+    size: float = Field(gt=0)
+    kind: Literal["fillet", "chamfer"] = "fillet"
+
+
+class Unfillet(Operation):
+    """Remove a fillet or chamfer: a line-pair arc or bevel by its name, a macro corner by its
+    arc or chamfer reference (`rect1.tl_arc`)."""
+    op: Literal["unfillet"]
+    sketch: str
+    entity: str
+
+
 class WriteBack(Operation):
     op: Literal["write_back"]
     sketch: str
@@ -245,6 +264,8 @@ EditOperation = Annotated[
     | DeleteConstraint
     | SetConstraintValue
     | SetConstraintArgument
+    | FilletCorners
+    | Unfillet
     | WriteBack
     | WritePoses
     | SetEntityArgument
