@@ -538,6 +538,8 @@ export interface DimensionDrawing { lines: Pt[][]; arrows: { tip: Pt; dir: Pt }[
 /** The measured span of a dimension: the two points it runs between, or the circle, or the lines of an angle. */
 function span(m: SketchModel, kind: string, refs: string[]): { a: Pt; b: Pt } | null {
   if (kind === 'length') {
+    const size = /^([A-Za-z_][A-Za-z0-9_]*)\.(width|height|length)$/.exec(refs[0]);
+    if (size) return macroSizeSpan(m, size[1], size[2]);
     const line = curveOf(m, refs[0]);
     return line && line.kind === 'line' ? { a: line.a, b: line.b } : null;
   }
@@ -554,6 +556,25 @@ function span(m: SketchModel, kind: string, refs: string[]): { a: Pt; b: Pt } | 
   const line = curveOf(m, l), pp = handleAt(m, p);
   if (!line || line.kind !== 'line' || !pp) return null;
   return { a: pp, b: footOnLine(pp, line.a, line.b) };
+}
+
+/** What a macro's size measures: a rect's width along its top (sharp corner to sharp corner), its
+ * height along its left side, a slot's length tip to tip and its width across the start arc. */
+function macroSizeSpan(m: SketchModel, n: string, part: string): { a: Pt; b: Pt } | null {
+  const info = m.entities.get(n);
+  if (info?.kind === 'rect') {
+    const tl = handleAt(m, `${n}.tl`), tr = handleAt(m, `${n}.tr`), bl = handleAt(m, `${n}.bl`);
+    if (!tl || !tr || !bl) return null;
+    return part === 'width' ? { a: tl, b: tr } : part === 'height' ? { a: bl, b: tl } : null;
+  }
+  if (info?.kind === 'slot') {
+    const s = handleAt(m, `${n}.start`), e = handleAt(m, `${n}.end`), arc = curveOf(m, `${n}.start_arc`);
+    if (!s || !e || !arc || arc.kind === 'line') return null;
+    const L = Math.hypot(e[0] - s[0], e[1] - s[1]) || 1, d: Pt = [(e[0] - s[0]) / L, (e[1] - s[1]) / L], r = arc.r;
+    if (part === 'length') return { a: [s[0] - d[0] * r, s[1] - d[1] * r], b: [e[0] + d[0] * r, e[1] + d[1] * r] };
+    if (part === 'width') return { a: [s[0] - d[1] * r, s[1] + d[0] * r], b: [s[0] + d[1] * r, s[1] - d[0] * r] };
+  }
+  return null;
 }
 
 /** A linear dimension between P and Q: the dimension line runs through the label, parallel to PQ,

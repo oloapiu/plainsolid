@@ -476,6 +476,27 @@ await page.waitForSelector('[data-testid=param-list]');
   await page.keyboard.press(process.platform === 'darwin' ? 'Meta+z' : 'Control+z');
   await waitHash(h);
 
+  // the tool itself on a macro's side: one pick, the size follows the cursor, the placement writes rect1.height and it draws
+  h = (await st()).hash;
+  await page.evaluate(() => window.__plainsolid.actions.edit({ op: 'add_sketch_entity', sketch: 'profile', kind: 'rect', name: 'rect1', args: { width: 12, height: 8, at: [60, 40] } }));
+  await waitHash(h);
+  await page.keyboard.press('d'); await page.waitForTimeout(150);
+  await clickAt(66, 40);  // the right side
+  const rectPick = (await st()).sketchMode?.selection ?? [];
+  pm = await at(72, 40); await page.mouse.move(pm[0], pm[1]); await page.waitForTimeout(200);
+  const previewH = (await page.locator('[data-testid=snap-glyph]').textContent().catch(() => '')) ?? '';
+  await clickAt(72, 40);
+  await page.waitForSelector('[data-testid=dim-pending-input]', { timeout: 5000 });
+  h = (await st()).hash;
+  await page.locator('[data-testid=dim-pending-input]').press('Enter'); await waitHash(h);
+  await page.keyboard.press('Escape'); await page.keyboard.press('Escape'); await page.waitForTimeout(150);
+  const heightDim = readFile().match(/profile\.length\("(len\d+)", "rect1.height", 8, at=\(72, 40\)\)/);
+  check('one pick on a rect side dimensions its height: the size follows the cursor and the placed dimension draws',
+    rectPick.join() === 'rect1.right' && previewH === '8' && heightDim !== null && (await page.locator(`[data-testid=dim-${heightDim?.[1]}]`).count()) === 1,
+    `pick ${rectPick.join(',')}, preview ${previewH}, ${readFile().match(/profile\.length\("len\d+", "rect1.height".*/)?.[0] ?? 'no statement'}`);
+  await page.locator('[data-testid=viewport] canvas').focus();
+  for (let i = 0; i < 2; i++) { h = (await st()).hash; await page.keyboard.press(process.platform === 'darwin' ? 'Meta+z' : 'Control+z'); await waitHash(h); }
+
   // a fillet on the L's outer corner from the right-click menu: an arc with its relations, a virtual sharp, a radius dimension
   await page.evaluate(() => window.__plainsolid.actions.setSketchSelection([]));
   const solBefore = await profileSol();
