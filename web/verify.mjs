@@ -428,16 +428,16 @@ await page.waitForSelector('[data-testid=param-list]');
   // two points: where the cursor places the label decides what is measured (right of the pair: the vertical distance)
   await clickAt(-30, 0); await clickAt(-26, 62);
   const picks = (await st()).sketchMode?.selection ?? [];
-  pm = await at(0, 30); await page.mouse.move(pm[0], pm[1]); await page.waitForTimeout(200);
+  pm = await at(5, 30); await page.mouse.move(pm[0], pm[1]); await page.waitForTimeout(200);
   const previewV = (await page.locator('[data-testid=snap-glyph]').textContent().catch(() => '')) ?? '';
-  await clickAt(0, 30);
+  await clickAt(5, 30);
   await page.waitForSelector('[data-testid=dim-pending-input]', { timeout: 5000 });
   h = (await st()).hash;
   await page.locator('[data-testid=dim-pending-input]').press('Enter'); await waitHash(h);
   await page.keyboard.press('Escape'); await page.keyboard.press('Escape'); await page.waitForTimeout(200);
   const toolOff = (await st()).sketchMode?.tool === null;
   check('two points placed beside the pair write the vertical distance, and escape clears the picks then stops the tool',
-    picks.length === 2 && previewV === '62' && toolOff && /profile\.distance\("d1", "(bottom\.start|outer_wall\.end)", "(inner_wall\.end|top\.start)", 62, along="y", at=\(0, 30\)\)/.test(readFile()),
+    picks.length === 2 && previewV === '62' && toolOff && /profile\.distance\("d1", "(bottom\.start|outer_wall\.end)", "(inner_wall\.end|top\.start)", 62, along="y", at=\(5, 30\)\)/.test(readFile()),
     `picks ${picks.join(',')}, preview ${previewV}, off ${toolOff}, ${readFile().match(/profile\.distance\("d1".*/)?.[0] ?? 'no statement'}`);
 
   // editing a dimension to an expression (with autocomplete available) writes the expression
@@ -454,6 +454,27 @@ await page.waitForSelector('[data-testid=param-list]');
   check('editing a dimension to an expression autocompletes names and writes the expression',
     suggest.includes('width') && /profile\.length\("len1", "line1", width \/ 3, at=\(50, 27\)\)/.test(readFile()) && (await page.locator('[data-testid=dim-len1]').textContent())?.includes('width / 3'),
     `suggest ${suggest.join(',')}, ${readFile().match(/profile\.length\("len1".*/)?.[0]}`);
+
+  // the sketch's origin is a built-in reference: picked over the line through it, related and dimensioned like a point
+  await page.keyboard.press('Escape'); await page.keyboard.press('Escape'); await page.waitForTimeout(150);
+  await page.evaluate(() => window.__plainsolid.actions.setSketchSelection(['line1.start']));
+  await clickAt(0, 0, ['Shift']);
+  const withOrigin = (await st()).sketchMode?.selection ?? [];
+  const originRelations = (await page.locator('[data-testid=sketch-selected]').textContent().catch(() => '')) ?? '';
+  await page.keyboard.press('d'); await page.waitForTimeout(200);
+  await clickAt(20, -10);
+  await page.waitForSelector('[data-testid=dim-pending-input]', { timeout: 5000 });
+  h = (await st()).hash;
+  await page.locator('[data-testid=dim-pending-input]').press('Enter'); await waitHash(h);
+  await page.keyboard.press('Escape'); await page.keyboard.press('Escape'); await page.waitForTimeout(150);
+  check('the origin is picked through the line over it, offers relations, and takes a distance dimension',
+    withOrigin.includes('origin') && withOrigin.includes('line1.start') && /coincident/.test(originRelations)
+      && /profile\.distance\("d2", "line1.start", "origin", 40, along="x", at=\(20, -10\)\)/.test(readFile()),
+    `selection ${withOrigin.join(',')}, panel ${originRelations.slice(0, 60)}, ${readFile().match(/profile\.distance\("d2".*/)?.[0] ?? 'no statement'}`);
+  await page.locator('[data-testid=viewport] canvas').focus();
+  h = (await st()).hash;
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+z' : 'Control+z');
+  await waitHash(h);
 
   // dragging a label writes its new place into the file
   const lb = await page.locator('[data-testid=dim-len1]').boundingBox();

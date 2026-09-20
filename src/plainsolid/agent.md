@@ -151,6 +151,12 @@ Constraints, each `s.kind("name", refs..., value)`:
 | diameter, radius | a circle or arc and the value |
 | angle | two lines and the value in degrees, 0 to 180, between the lines' directions; `reverse=True` measures against the second line's opposite direction (the supplementary sector), so either angle of a V can be dimensioned without moving it |
 
+Every sketch has three references it never declares: `origin`, the point at
+its (0, 0), and `x_axis` and `y_axis`, the lines through it. They are fixed
+and take the relations a fixed point or line takes, so `coincident("c",
+"line1.start", "origin")` pins a corner and `symmetric("s", "l1.end",
+"l2.end", "y_axis")` centres a shape; entities cannot take those names.
+
 Every dimension takes `at=(x, y)`, where the GUI shows its label in sketch
 coordinates; it does not affect the geometry and a dimension without one gets a
 computed place. Dimensions (`distance`, `length`, `diameter`, `radius`, `angle`) are named and

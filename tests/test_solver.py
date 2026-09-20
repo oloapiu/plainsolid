@@ -187,3 +187,30 @@ def test_angle_is_unsigned_and_reverse_measures_the_supplementary_sector():
     for tail in ('s.angle("a", "l1", "l2", 150)\n', 's.angle("a", "l1", "l2", 30, reverse=True)\n'):
         lay = build(feature(v + tail))
         assert S.check_jacobians(lay.system, lay.system.initial()) < 1e-6
+
+
+@pytest.mark.solver
+def test_every_sketch_has_a_fixed_origin_and_axes():
+    """L3: `origin`, `x_axis` and `y_axis` are references every sketch has without declaring them;
+    they take the relations a fixed point or line takes, cannot be fixed again, and their names
+    are reserved."""
+    src = ('s = sketch("s", on=XY)\ns.line("l1", (1, 0.5), (30, 2))\ns.line("l2", (0, 1), (3, 25))\ns.point("p", (5, 1))\n'
+           's.coincident("c", "l1.start", "origin")\ns.on("o", "p", "x_axis")\ns.symmetric("sy", "l1.end", "l2.end", "y_axis")\n'
+           's.angle("a", "l2", "x_axis", 90, reverse=True)\ns.distance("d", "p", "origin", 5)\ns.length("w", "l1", 30)\n')
+    sol = solve_sketch(feature(src))
+    assert sol.residual < 1e-9 and not sol.conflicting, (sol.conflicting, sol.residual)
+    assert sol.coords["l1"]["start"] == pytest.approx((0, 0), abs=1e-6)
+    assert sol.coords["p"]["at"] == pytest.approx((5, 0), abs=1e-6)
+    assert sol.coords["l2"]["end"][0] == pytest.approx(-sol.coords["l1"]["end"][0], abs=1e-6)
+    assert sol.coords["l2"]["end"][1] == pytest.approx(sol.coords["l1"]["end"][1], abs=1e-6)
+    assert sol.coords["l2"]["start"][0] == pytest.approx(sol.coords["l2"]["end"][0], abs=1e-6)  # vertical
+    assert "origin" not in sol.free_entities and "x_axis" not in sol.free_entities
+    lay = build(feature(src))
+    assert S.check_jacobians(lay.system, lay.system.initial()) < 1e-6
+    with pytest.raises(Exception, match="fixed already"):
+        solve_sketch(feature(src + 's.fix("f", "origin")\n'))
+    doc = parse_document(HEAD + 's = sketch("s", on=XY)\ns.line("origin", (0, 0), (1, 1))\n')
+    assert doc.errors and "built-in" in doc.errors[0].message
+    # a constraint may carry the name: constraints are never referenced (the zoo's bracket fixes its corner with one)
+    doc = parse_document(HEAD + 's = sketch("s", on=XY)\ns.line("l", (0, 0), (1, 1))\ns.fix("origin", "l.start")\n')
+    assert not doc.errors

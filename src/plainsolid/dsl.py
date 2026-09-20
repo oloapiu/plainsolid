@@ -184,6 +184,11 @@ class FeatureHandle:
         return f"<{self._feature.kind} {self._feature.name}>"
 
 
+# every sketch has these references without declaring them: its origin and its axes, fixed.
+# Entities cannot take the names (references name entities); constraints can, they are never referenced.
+BUILTIN_REFS = ("origin", "x_axis", "y_axis")
+
+
 def _pt(p) -> tuple[float, float]:
     try:
         x, y = p
@@ -215,6 +220,8 @@ class SketchHandle(FeatureHandle):
         b = _builder()
         if not isinstance(name, str) or not name.isidentifier():
             raise ValueError(f"entity name must be an identifier, got {name!r}")
+        if name in BUILTIN_REFS:
+            raise ValueError(f"{name!r} is a built-in reference of every sketch; pick another name")
         if self._feature.entity(name) or self._feature.constraint(name):
             raise ValueError(f"duplicate name {name!r} in sketch {self._feature.name!r}")
         self._feature.entities.append(

@@ -348,6 +348,8 @@ def _on(lay: Layout, name: str, point: str, curve: str, what: str) -> None:
 
 
 def _fix_parts(lay: Layout, target: str, x0: np.ndarray, what: str) -> list[S.Constraint]:
+    if target in ("origin", "x_axis", "y_axis"):
+        raise SketchError(f"{what}: {target} is fixed already")
     ref = lay.refs.get(target)
     kind = lay.kinds.get(target)
     parts: list[S.Constraint] = []
@@ -367,6 +369,11 @@ def _fix_parts(lay: Layout, target: str, x0: np.ndarray, what: str) -> list[S.Co
 def build(feature: Feature, projected: dict[str, Projected] | None = None) -> Layout:
     lay = Layout()
     projected = projected or {}
+    # the sketch's own origin and axes: fixed references every sketch has without declaring them
+    o = S.ConstPoint(0.0, 0.0)
+    lay.refs["origin"] = o
+    lay.refs["x_axis"] = S.LineRef(o, S.ConstPoint(1.0, 0.0))
+    lay.refs["y_axis"] = S.LineRef(o, S.ConstPoint(0.0, 1.0))
     for e in feature.entities:
         _add_entity(lay, e, projected)
     x0 = lay.system.initial()

@@ -625,7 +625,8 @@ export function revealCode() { set({ codeReveal: state.codeReveal + 1 }); }
 export async function deleteSketchSelection(): Promise<boolean> {
   const sm = state.sketchMode;
   if (!sm || !sm.selection.length) return false;
-  const names = [...new Set(sm.selection.map((r) => r.split('.')[0]))];
+  const names = [...new Set(sm.selection.map((r) => r.split('.')[0]))].filter((n) => n !== 'origin' && n !== 'x_axis' && n !== 'y_axis');  // the built-ins stay
+  if (!names.length) return false;
   const ops: EditOp[] = names.map((n) => ({ op: 'delete_sketch_entity', sketch: sm.sketch, entity: n }));
   const ok = await sketchBatch(ops, `deleted ${names.join(', ')}`);
   if (ok) toggleSketchSelect(null, false);

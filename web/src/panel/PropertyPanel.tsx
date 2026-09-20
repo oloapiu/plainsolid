@@ -12,7 +12,7 @@ import { FeatureDialog } from './FeatureDialog';
 import { MATE_KINDS, TOOL_KINDS, VIEW_DIRECTIONS, DIMENSION_KINDS, type CompareRegion, type Constraint, type Entity, type Feature, type EditValue, type Overlay, type Tree } from '../api/types';
 import { MeasurePanel } from './MeasurePanel';
 import { ExprInput } from './ExprInput';
-import { GLYPH, buildModel, validConstraints, dimensionFor, entityOf, refKind } from '../sketch/model';
+import { GLYPH, buildModel, validConstraints, dimensionFor, entityOf, refKind, isBuiltin } from '../sketch/model';
 import { subAssemblyOf, openSubAssembly } from '../menu/entries';
 
 function parseValue(text: string): EditValue {
@@ -779,7 +779,8 @@ function SketchSelected({ f }: { f: Feature }) {
   const plan = sel.length ? dimensionFor(model, sel) : null;
   const ents = [...new Set(sel.map(entityOf))].map((n) => model.entities.get(n)).filter((e) => e && !e.projected && e.kind !== 'point');
   const allConstruction = ents.length > 0 && ents.every((e) => e!.construction);
-  const curves = sel.filter((r) => refKind(model, r) !== 'point' && !r.endsWith('.axis'));
+  const curves = sel.filter((r) => refKind(model, r) !== 'point' && !r.endsWith('.axis') && !isBuiltin(r));
+  const deletable = !sel.every(isBuiltin);
   return (
     <div className="sketch-selected" data-testid="sketch-selected">
       {sel.length > 0 && (
@@ -798,7 +799,7 @@ function SketchSelected({ f }: { f: Feature }) {
                       title={allConstruction ? 'make profile geometry' : 'make construction geometry'}>construction</button>
             )}
             {curves.length > 0 && <button className="btn-small" data-testid="sketch-offset" title="offset the selected curves: click the side, then type the distance" onClick={() => setSketchTool('offset')}>offset…</button>}
-            <button className="btn-small danger" onClick={() => void deleteSketchSelection()} title="delete the selected entities (del)">delete</button>
+            {deletable && <button className="btn-small danger" onClick={() => void deleteSketchSelection()} title="delete the selected entities (del)">delete</button>}
             <button className="btn-small" onClick={() => toggleSketchSelect(null, false)}>clear</button>
           </div>
         </>

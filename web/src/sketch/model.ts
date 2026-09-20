@@ -12,7 +12,12 @@ export type Curve =
   | { ref: string; entity: string; kind: 'circle'; c: Pt; r: number }
   | { ref: string; entity: string; kind: 'arc'; c: Pt; r: number; a0: number; a1: number };
 
-export interface EntityInfo { name: string; kind: string; construction: boolean; projected: boolean }
+export interface EntityInfo { name: string; kind: string; construction: boolean; projected: boolean; builtin?: boolean }
+
+/** References every sketch has without declaring them: its origin and its axes, fixed. */
+export const BUILTIN_REFS = ['origin', 'x_axis', 'y_axis'] as const;
+export const isBuiltin = (ref: string): boolean => (BUILTIN_REFS as readonly string[]).includes(entityOf(ref));
+const AXIS_REACH = 1e4;  // the axes are lines without ends; drawn across the grid, hit anywhere
 
 export interface SketchModel {
   handles: Handle[];
@@ -41,6 +46,13 @@ export function buildModel(f: Feature, override?: Record<string, Record<string, 
   const entities = new Map<string, EntityInfo>();
   const H = (ref: string, entity: string, p: Pt, kind: Handle['kind']) => handles.push({ ref, entity, p, kind });
   const L = (ref: string, entity: string, a: Pt, b: Pt, decor = false) => curves.push({ ref, entity, kind: 'line', a, b, decor });
+  // the built-ins first, so user geometry drawn later paints over them
+  entities.set('origin', { name: 'origin', kind: 'origin', construction: true, projected: true, builtin: true });
+  entities.set('x_axis', { name: 'x_axis', kind: 'axis', construction: true, projected: true, builtin: true });
+  entities.set('y_axis', { name: 'y_axis', kind: 'axis', construction: true, projected: true, builtin: true });
+  H('origin', 'origin', [0, 0], 'point');
+  L('x_axis', 'x_axis', [-AXIS_REACH, 0], [AXIS_REACH, 0]);
+  L('y_axis', 'y_axis', [0, -AXIS_REACH], [0, AXIS_REACH]);
   for (const e of f.entities) {
     const a = solvedArgs(e, sol, override);
     const n = e.name;
@@ -187,22 +199,30 @@ export function distToSegment(p: Pt, a: Pt, b: Pt): number {
   return Math.hypot(p[0] - (a[0] + t * dx), p[1] - (a[1] + t * dy));
 }
 
-/** The handle or curve under a point, handles first. Tolerance in sketch units. */
+/** The handle or curve under a point: handles before curves, and within each the sketch's own
+ * geometry before the built-ins, so the origin is picked over an axis and over a line through it,
+ * but never over a handle sitting on it. Tolerance in sketch units. */
 export function hitTest(m: SketchModel, p: Pt, tol: number, mids = false): { ref: string; kind: RefKind; handle?: Handle } | null {
-  let best: Handle | null = null, bd = tol;
-  for (const h of m.handles) {
-    if (h.kind === 'mid' && !mids) continue;  // midpoints only on request (alt): the line itself is the common pick
-    const d = Math.hypot(h.p[0] - p[0], h.p[1] - p[1]);
-    if (d <= bd) { best = h; bd = d; }
+  for (const builtin of [false, true]) {
+    let best: Handle | null = null, bd = tol;
+    for (const h of m.handles) {
+      if (h.kind === 'mid' && !mids) continue;  // midpoints only on request (alt): the line itself is the common pick
+      if (isBuiltin(h.ref) !== builtin) continue;
+      const d = Math.hypot(h.p[0] - p[0], h.p[1] - p[1]);
+      if (d <= bd) { best = h; bd = d; }
+    }
+    if (best) return { ref: best.ref, kind: 'point', handle: best };
   }
-  if (best) return { ref: best.ref, kind: 'point', handle: best };
-  let bc: Curve | null = null; bd = tol;
-  for (const c of m.curves) {
-    if (!c.ref) continue;
-    const d = distToCurve(c, p);
-    if (d <= bd) { bc = c; bd = d; }
+  for (const builtin of [false, true]) {
+    let bc: Curve | null = null, bd = tol;
+    for (const c of m.curves) {
+      if (!c.ref || isBuiltin(c.ref) !== builtin) continue;
+      const d = distToCurve(c, p);
+      if (d <= bd) { bc = c; bd = d; }
+    }
+    if (bc) return { ref: bc.ref, kind: bc.kind === 'line' ? 'line' : 'circle' };
   }
-  return bc ? { ref: bc.ref, kind: bc.kind === 'line' ? 'line' : 'circle' } : null;
+  return null;
 }
 
 /** The point to drag when the user grabs a reference. Null when it cannot be dragged. */
@@ -235,16 +255,18 @@ export function validConstraints(m: SketchModel, sel: string[]): ConstraintChoic
   const by = (k: RefKind) => sel.filter((_, i) => kinds[i] === k);
   const mk = (kind: string, refs: string[], options?: Record<string, JsonValue>): ConstraintChoice => ({ kind, label: LABELS[kind] ?? kind, refs, options });
   const out: ConstraintChoice[] = [];
+  const builtin = sel.some(isBuiltin);
   if (sel.length === 1) {
+    if (builtin) return [];  // fixed already, nothing to hold
     if (kinds[0] === 'line') out.push(mk('horizontal', sel), mk('vertical', sel));
     out.push(mk('fix', sel));
     return out;
   }
   if (sel.length === 2) {
     if (key === 'point+point') return [mk('coincident', sel), mk('horizontal', sel), mk('vertical', sel)];
-    if (key === 'line+point') { const p = by('point'), l = by('line'); return [mk('coincident', [p[0], l[0]]), mk('midpoint', [p[0], l[0]])]; }
+    if (key === 'line+point') { const p = by('point'), l = by('line'); return isBuiltin(l[0]) ? [mk('coincident', [p[0], l[0]])] : [mk('coincident', [p[0], l[0]]), mk('midpoint', [p[0], l[0]])]; }
     if (key === 'circle+point') { const p = by('point'), c = by('circle'); return [mk('on', [p[0], c[0]])]; }
-    if (key === 'line+line') return [mk('parallel', sel), mk('perpendicular', sel), mk('equal', sel), mk('colinear', sel)];
+    if (key === 'line+line') return builtin ? [mk('parallel', sel), mk('perpendicular', sel), mk('colinear', sel)] : [mk('parallel', sel), mk('perpendicular', sel), mk('equal', sel), mk('colinear', sel)];
     if (key === 'circle+circle') return [mk('concentric', sel), mk('coradial', sel), mk('equal', sel), mk('tangent', sel)];
     if (key === 'circle+line') { const l = by('line'), c = by('circle'); return [mk('tangent', [l[0], c[0]])]; }
   }
@@ -280,6 +302,7 @@ export function dimensionFor(m: SketchModel, sel: string[], cursor?: Pt, lock: D
   const kinds = sel.map((r) => refKind(m, r));
   if (kinds.some((k) => k === null) || sel.length === 0 || sel.length > 2) return null;
   if (sel.length === 1) {
+    if (isBuiltin(sel[0])) return null;
     const c = curveOf(m, sel[0]);
     const info = c ? m.entities.get(c.entity) : undefined;
     // a side of a rect or a slot: the macro's own size

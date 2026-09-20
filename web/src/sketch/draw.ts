@@ -16,6 +16,7 @@ export const COLORS = {
   hover: 0xffe08a,
   preview: 0xffcc66,
   handle: 0x9fd3ff,
+  axis: 0x5c6670,        // the sketch's own origin and axes: faint, dashed
 };
 
 export function toWorld(frame: PlaneFrame, p: Pt, lift = 0.05): THREE.Vector3 {
@@ -72,8 +73,9 @@ export function disposeGroup(g: THREE.Object3D) {
 
 export interface DrawState { selection: Set<string>; hover: string | null; highlight: Set<string> }
 
-/** The whole sketch as one group: curves coloured by status, handles as points. */
-export function drawModel(frame: PlaneFrame, m: SketchModel, st: DrawState): THREE.Group {
+/** The whole sketch as one group: curves coloured by status, handles as points. The built-in axes
+ * are drawn across `reach` sketch units either side of the origin. */
+export function drawModel(frame: PlaneFrame, m: SketchModel, st: DrawState, reach = 60): THREE.Group {
   const g = new THREE.Group();
   const entOf = (ref: string) => ref.split('.')[0];
   const isOn = (ref: string, entity: string) => st.selection.has(ref) || st.selection.has(entity) || st.highlight.has(ref) || st.highlight.has(entity);
@@ -81,6 +83,12 @@ export function drawModel(frame: PlaneFrame, m: SketchModel, st: DrawState): THR
     const info = m.entities.get(c.entity);
     let color = COLORS.fixed;
     let dashed = false;
+    if (info?.builtin && c.kind === 'line') {
+      const lit = st.hover === c.ref ? COLORS.hover : isOn(c.ref, c.entity) ? COLORS.selected : COLORS.axis;
+      const u: Pt = c.entity === 'x_axis' ? [1, 0] : [0, 1];
+      g.add(polyline(frame, [[-u[0] * reach, -u[1] * reach], [u[0] * reach, u[1] * reach]], lit, true));
+      continue;
+    }
     if (info?.projected) { color = COLORS.projected; dashed = info.construction; }
     else if (info?.construction) {
       dashed = true;
@@ -93,13 +101,15 @@ export function drawModel(frame: PlaneFrame, m: SketchModel, st: DrawState): THR
     else if (!c.ref && (st.selection.has(c.entity) || st.highlight.has(c.entity))) color = COLORS.selected;
     g.add(polyline(frame, curvePoints(c), color, dashed));
   }
-  const plain: Pt[] = [], lit: Pt[] = [], hov: Pt[] = [];
+  const plain: Pt[] = [], lit: Pt[] = [], hov: Pt[] = [], builtin: Pt[] = [];
   for (const h of m.handles) {
     if (h.kind === 'mid') continue;
     if (st.hover === h.ref) hov.push(h.p);
     else if (isOn(h.ref, entOf(h.ref))) lit.push(h.p);
+    else if (m.entities.get(h.entity)?.builtin) builtin.push(h.p);
     else plain.push(h.p);
   }
+  if (builtin.length) g.add(points(frame, builtin, COLORS.axis, 7));
   if (plain.length) g.add(points(frame, plain, COLORS.handle, 5));
   if (lit.length) g.add(points(frame, lit, COLORS.selected, 8));
   if (hov.length) g.add(points(frame, hov, COLORS.hover, 9));

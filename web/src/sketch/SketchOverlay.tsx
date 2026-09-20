@@ -11,7 +11,7 @@ import { item, SEP } from '../menu/entries';
 import type { EditOp, JsonValue, PickedEntity } from '../api/types';
 import {
   buildModel, hitTest, dragTarget, validConstraints, dimensionFor, dimensionDrawing, labelOf, dimText, entityOf, fmtNum, type DimensionDrawing, type DimensionPlan, type Pt, type SketchModel, refKind, curvePointsOf,
-  curveOf, nearestOnCurve, CONSTRAINT_PREFIX,
+  curveOf, nearestOnCurve, CONSTRAINT_PREFIX, isBuiltin,
 } from './model';
 import { drawModel, drawDimension, planeGrid, polyline, points, toWorld, disposeGroup, snap, round3, curvePoints, COLORS } from './draw';
 import { SketchLabels } from './SketchLabels';
@@ -108,7 +108,7 @@ export function SketchOverlay() {
     if (!scene || !frame) return;
     if (group.current) { scene.overlay.remove(group.current); disposeGroup(group.current); }
     if (!model) return;
-    const g = drawModel(frame, model, { selection: new Set(sm.selection), hover: sm.hover, highlight: new Set(sm.highlight) });
+    const g = drawModel(frame, model, { selection: new Set(sm.selection), hover: sm.hover, highlight: new Set(sm.highlight) }, scene.modelSize() * 1.2);
     const px = scene.pixelSize();
     for (const c of model.constraints) {
       const d = dims[c.name];
@@ -399,14 +399,13 @@ export function SketchOverlay() {
         const plan = dimensionFor(m, sel);
         if (plan) out.push(item(`dimension (${plan.kind})`, () => startDimension(), { key: 'd' }));
         const edits: MenuEntry[] = [];
-        const curves = sel.filter((r) => refKind(m, r) !== 'point' && !r.endsWith('.axis'));
+        const curves = sel.filter((r) => refKind(m, r) !== 'point' && !r.endsWith('.axis') && !isBuiltin(r));
         if (curves.length) edits.push(item('offset…', () => setSketchTool('offset'), { title: 'click the side to offset to, then type the distance' }));
         const ents = [...new Set(sel.map(entityOf))].map((n) => m.entities.get(n)).filter((e) => e && !e.projected && e.kind !== 'point');
         if (ents.length) edits.push(item(ents.every((e) => e!.construction) ? 'make profile geometry' : 'make construction geometry', () => void toggleConstructionSelection()));
         if (out.length && edits.length) out.push(SEP);
         out.push(...edits);
-        if (out.length) out.push(SEP);
-        out.push(item('delete', () => void deleteSketchSelection(), { danger: true, key: 'del' }));
+        if (!sel.every(isBuiltin)) { if (out.length) out.push(SEP); out.push(item('delete', () => void deleteSketchSelection(), { danger: true, key: 'del' })); }
       } else if (body) {
         title = `body ${body.kind} ${body.id}`;
         out.push(item(body.kind === 'face' ? 'convert the face outline' : `convert this ${body.kind}`, () => { toggleBodySelect(body, false); void convertBodySelection(false); }));
@@ -507,7 +506,7 @@ export function SketchOverlay() {
     const value = expressionValue(text);
     if (value === null) { setError('offset: give a distance'); return; }
     setOffsetDistance(text);
-    const picked = [...new Set(sm.selection.filter((r) => refKind(m, r) !== 'point' && !r.endsWith('.axis')))];
+    const picked = [...new Set(sm.selection.filter((r) => refKind(m, r) !== 'point' && !r.endsWith('.axis') && !isBuiltin(r)))];
     const refs = picked.length ? picked
       : feature.entities.filter((e) => !e.construction && e.kind !== 'point').map((e) => e.name);
     if (!refs.length) { setError('offset: select curves first, or draw a profile'); return; }
