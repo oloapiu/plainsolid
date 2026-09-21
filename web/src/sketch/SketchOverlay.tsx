@@ -4,14 +4,14 @@ import * as THREE from 'three';
 import { sceneRef } from '../viewport/Viewport';
 import { frameFromInfo, type PlaneFrame } from '../viewport/scene';
 import {
-  useStore, edit, hoverEntity, exitSketch, featureByName, nextName, setSketchTool, setStatus, setError, sketchBatch, sketchNames, toggleSketchSelect, setSketchHover, startDrag, previewDrag, endDrag, cancelDragPreview, addConstraint, startDimension, setDimLock, setSketchSelection, askCorner, cancelCornerAsk, filletCorners, unfillet, expressionNames, expressionValue, toggleConstructionMode, toggleConstructionSelection, type SketchTool, useBodyInRelation, selectorTarget, toggleBodySelect, convertBodySelection,
+  useStore, edit, hoverEntity, exitSketch, featureByName, nextName, setSketchTool, setStatus, setError, sketchBatch, sketchNames, toggleSketchSelect, setSketchHover, startDrag, previewDrag, endDrag, cancelDragPreview, addConstraint, startDimension, setDimLock, setSketchSelection, askCorner, cancelCornerAsk, filletCorners, unfillet, trimAt, expressionNames, expressionValue, toggleConstructionMode, toggleConstructionSelection, type SketchTool, useBodyInRelation, selectorTarget, toggleBodySelect, convertBodySelection,
   openContextMenu, openFeatureDialog, deleteSketchSelection, getState, type MenuEntry,
 } from '../state/store';
 import { item, SEP } from '../menu/entries';
 import type { EditOp, JsonValue, PickedEntity } from '../api/types';
 import {
   buildModel, hitTest, dragTarget, validConstraints, dimensionFor, dimensionDrawing, labelOf, dimText, entityOf, fmtNum, type DimensionDrawing, type DimensionPlan, type Pt, type SketchModel, refKind, curvePointsOf,
-  curveOf, nearestOnCurve, CONSTRAINT_PREFIX, isBuiltin, cornersOf, removableCut, handleAt,
+  curveOf, nearestOnCurve, CONSTRAINT_PREFIX, isBuiltin, cornersOf, removableCut, handleAt, isConstructionRef, hitCurve, trimmable, trimPiece,
 } from './model';
 import { drawModel, drawDimension, planeGrid, polyline, points, toWorld, disposeGroup, snap, round3, curvePoints, COLORS } from './draw';
 import { SketchLabels } from './SketchLabels';
@@ -25,6 +25,7 @@ const TOOLS: { id: SketchTool; label: string; key: string; hint: string }[] = [
   { id: 'slot', label: 'slot', key: 's', hint: 'click both arc centres, then a point for the width' },
   { id: 'polygon', label: 'polygon', key: 'p', hint: 'click points, double-click or click the first point to close' },
   { id: 'point', label: 'point', key: 'o', hint: 'click to place a point' },
+  { id: 'trim', label: 'trim', key: 't', hint: 'click the piece of a line, arc or circle to remove: it goes up to the nearest crossings' },
 ];
 
 /** A point the cursor snapped to: a handle (coincident), a midpoint, or a point on a curve. */
@@ -264,6 +265,16 @@ export function SketchOverlay() {
         return;
       }
       if (tool === 'offset') { setSketchHover(null); return; }
+      if (tool === 'trim') {
+        // the piece that would go lights up in the conflict colour
+        const c = m ? hitCurve(m, [u, v], tol()) : null;
+        const ok = c && m && trimmable(m, c.ref);
+        const piece = ok ? trimPiece(m, c.ref, [u, v]) : null;
+        setSketchHover(ok ? c.ref : null);
+        setPreview(piece ? polyline(frame, piece, COLORS.conflict, false, 2) : null);
+        setSnapGlyph(c && !ok ? (() => { const [x, y] = scene.toScreen(toWorld(frame, [u, v])); return { x, y, text: '⊘', title: 'cannot trim this' }; })() : null);
+        return;
+      }
       if (pts.length === 0) { const sn = snapPoint(u, v); setSketchHover(sn.snap === 'handle' || sn.snap === 'mid' ? sn.ref : null); showGlyph(sn, null); return; }
       const sn = snapPoint(u, v);
       const s = sn.p;
@@ -298,6 +309,14 @@ export function SketchOverlay() {
         return;
       }
       if (tool === 'offset') { setPending({ kind: 'offset', at: [round3(u), round3(v)] }); return; }
+      if (tool === 'trim') {
+        const c = m ? hitCurve(m, [u, v], tol()) : null;
+        if (!c) return;
+        if (!m || !trimmable(m, c.ref)) { const info = m?.entities.get(entityOf(c.ref)); setStatus(info?.builtin ? 'the axes cannot be trimmed' : info?.projected ? `${c.entity} follows other geometry and cannot be trimmed` : `${c.entity} is a ${info?.kind}: its sides cannot be trimmed, draw such an outline with lines`); return; }
+        setPreview(null);
+        void trimAt(c.ref, [round3(u), round3(v)]);
+        return;
+      }
       if (tool === 'dimension') {
         const hit = m ? hitTest(m, [u, v], tol()) : null;
         if (hit) {  // a pick: in or out of the picks, the newest two stay
@@ -361,6 +380,7 @@ export function SketchOverlay() {
       const out: MenuEntry[] = [];
       let title = `sketch ${sketch}`;
       const toolItems = (skip: SketchTool) => TOOLS.filter((t) => t.id !== skip).map((t) => item(t.label, () => setSketchTool(t.id), { key: t.key }));
+      if (tool === 'trim') { out.push(item('stop trimming', () => setSketchTool(null), { key: 'esc' }), SEP, ...toolItems('trim')); openContextMenu(ev.clientX, ev.clientY, out, 'trim'); return; }
       if (tool && tool !== 'dimension' && tool !== 'project' && tool !== 'offset') {
         if (tool === 'line' && pointsRef.current.length) {
           out.push(item('end the chain here', () => { reset(); chainRef.current = null; }));
@@ -412,8 +432,8 @@ export function SketchOverlay() {
         if (cut) edits.push(item(`remove the ${cut.what}`, () => void unfillet(cut.entity)));
         const curves = sel.filter((r) => refKind(m, r) !== 'point' && !r.endsWith('.axis') && !isBuiltin(r));
         if (curves.length) edits.push(item('offset…', () => setSketchTool('offset'), { title: 'click the side to offset to, then type the distance' }));
-        const ents = [...new Set(sel.map(entityOf))].map((n) => m.entities.get(n)).filter((e) => e && !e.projected && e.kind !== 'point');
-        if (ents.length) edits.push(item(ents.every((e) => e!.construction) ? 'make profile geometry' : 'make construction geometry', () => void toggleConstructionSelection()));
+        const flippable = sel.filter((r) => { const i = m.entities.get(entityOf(r)); return !!i && !i.projected && !i.builtin && i.kind !== 'point'; });
+        if (flippable.length) edits.push(item(flippable.every((r) => isConstructionRef(m, r)) ? 'make profile geometry' : 'make construction geometry', () => void toggleConstructionSelection(), { title: 'a side of a rect or polygon flips on its own' }));
         if (out.length && edits.length) out.push(SEP);
         out.push(...edits);
         if (!sel.every(isBuiltin)) { if (out.length) out.push(SEP); out.push(item('delete', () => void deleteSketchSelection(), { danger: true, key: 'del' })); }
@@ -574,7 +594,8 @@ export function SketchOverlay() {
         </label>
         <button className={`btn-small ${sm.tool === 'project' ? 'active' : ''} ${sm.construction && sm.tool === 'project' ? 'construction' : ''}`} title="convert body edges, vertices or a face outline into sketch geometry that follows the body (e); stays on until esc" data-testid="sketch-project" onClick={() => setSketchTool(sm.tool === 'project' ? null : 'project')}>convert</button>
         <span className="sketch-hint">
-          {tool ? `${sm.construction ? 'construction · ' : ''}${tool.hint}${nPoints ? ` (${nPoints} placed)` : ''}`
+          {sm.tool === 'trim' ? (sm.hover ? `trim ${sm.hover}: click to remove the lit piece · esc stops` : 'trim: hover a line, arc or circle, click the piece to remove · esc stops')
+            : tool ? `${sm.construction ? 'construction · ' : ''}${tool.hint}${nPoints ? ` (${nPoints} placed)` : ''}`
             : sm.tool === 'dimension' ? (pending ? 'type the value, enter · esc drops it · clicking elsewhere keeps the measured value'
               : sm.selection.length ? `${sm.selection.join(' · ')}: click empty space to place${planKind ? ` the ${planKind}` : ''}, or pick another entity · esc clears the picks`
               : 'dimension: click an entity, or two, then click empty space to place it · esc stops')

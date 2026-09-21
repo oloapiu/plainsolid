@@ -62,6 +62,7 @@ export {
   toggleConstructionMode,
   toggleConstructionSelection,
   toggleSketchSelect,
+  trimAt,
   unfillet,
   unknownNames,
   useBodyInRelation,

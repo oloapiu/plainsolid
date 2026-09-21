@@ -14,6 +14,18 @@ RECT_ORDER = ("bl", "br", "tr", "tl")
 RECT_SIGNS = {"tl": (-1.0, 1.0), "tr": (1.0, 1.0), "br": (1.0, -1.0), "bl": (-1.0, -1.0)}
 
 
+RECT_SIDES = ("bottom", "right", "top", "left")  # in the order the profile walks them
+
+
+def side_names(kind: str, args: dict[str, Any]) -> tuple[str, ...]:
+    """The sides of a rect or polygon in walking order, by name."""
+    if kind == "rect":
+        return RECT_SIDES
+    if kind == "polygon":
+        return tuple(f"e{i}" for i in range(len(args.get("points", []))))
+    return ()
+
+
 def corner_names(kind: str, args: dict[str, Any]) -> tuple[str, ...]:
     if kind == "rect":
         return RECT_CORNERS

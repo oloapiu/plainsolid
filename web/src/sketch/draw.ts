@@ -90,7 +90,7 @@ export function drawModel(frame: PlaneFrame, m: SketchModel, st: DrawState, reac
       continue;
     }
     if (info?.projected) { color = COLORS.projected; dashed = info.construction; }
-    else if (info?.construction) {
+    else if (info?.construction || c.construction) {
       dashed = true;
       color = m.conflicting.has(c.entity) ? COLORS.constructionConflict : m.free.has(c.entity) ? COLORS.constructionFree : COLORS.construction;
     }

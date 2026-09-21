@@ -488,7 +488,7 @@ class Workspace:
     SKETCH_OPS: ClassVar[frozenset[str]] = frozenset({
         "add_sketch_entity", "delete_sketch_entity", "set_entity_argument", "add_constraint",
         "delete_constraint", "set_constraint_value", "set_constraint_argument", "solve_sketch", "batch",
-        "fillet_corners", "unfillet",
+        "fillet_corners", "unfillet", "trim",
     })
 
     def apply(self, doc: OpenDocument, op: dict[str, Any], base_hash: str | None) -> dict[str, Any]:
@@ -508,8 +508,8 @@ class Workspace:
                 extra["skipped"] = list(self._skipped)
             elif kind == "make_editable":
                 new, extra = self._make_editable(doc, old, op)
-            elif kind in ("fillet_corners", "unfillet"):
-                new = self._corner_op(doc, old, op)
+            elif kind in ("fillet_corners", "unfillet", "trim"):
+                new = self._composed_op(doc, old, op)
             else:
                 new = edit_ops.apply(old, op)
             solution = None
@@ -664,26 +664,32 @@ class Workspace:
             out.extend(n for n in names if n not in out)
         return out
 
-    def _corner_op(self, doc: OpenDocument, source: str, op: dict[str, Any]) -> str:
-        """A fillet, chamfer or its removal: composed from the sketch as solved now into the
-        ordinary operations, applied as one batch (the write-back then follows as usual)."""
+    def _composed_op(self, doc: OpenDocument, source: str, op: dict[str, Any]) -> str:
+        """A fillet, chamfer, its removal or a trim: composed from the sketch as solved now into
+        the ordinary operations, applied as one batch (the write-back then follows as usual)."""
         from .evaluate import sketch_context, solve_feature_sketch
         from .filleting import FilletError, fillet_ops, unfillet_ops
+        from .trimming import TrimError, trim_ops
 
         parsed = parse_document(source, str(doc.path))
         feature = parsed.feature(str(op["sketch"]))
         if feature is None or feature.kind != "sketch":
             raise edit_ops.EditError(f"no sketch {op['sketch']!r}")
-        coords = None
+        coords, projected = None, None
         try:
             body, plane, identity = sketch_context(parsed, feature, cache=doc._cache)
-            coords = solve_feature_sketch(feature, body, None, plane, identity).coords
+            solution = solve_feature_sketch(feature, body, None, plane, identity)
+            coords, projected = solution.coords, solution.projected
         except ValueError:
             pass  # the file's coordinates then
         try:
-            ops = fillet_ops(feature, coords, list(op["corners"]), float(op["size"]), str(op.get("kind", "fillet"))) \
-                if op["op"] == "fillet_corners" else unfillet_ops(feature, coords, str(op["entity"]))
-        except FilletError as exc:
+            if op["op"] == "fillet_corners":
+                ops = fillet_ops(feature, coords, list(op["corners"]), float(op["size"]), str(op.get("kind", "fillet")))
+            elif op["op"] == "unfillet":
+                ops = unfillet_ops(feature, coords, str(op["entity"]))
+            else:
+                ops = trim_ops(feature, coords, projected, str(op["entity"]), (float(op["at"][0]), float(op["at"][1])))
+        except (FilletError, TrimError) as exc:
             raise edit_ops.EditError(str(exc)) from None
         return edit_ops.apply(source, {"op": "batch", "sketch": feature.name, "ops": ops})
 

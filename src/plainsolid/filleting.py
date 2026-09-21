@@ -19,7 +19,7 @@ from .parse import POSITIONAL
 
 Pt = tuple[float, float]
 _EPS = 1e-6
-_PREFIX = {"coincident": "c", "tangent": "t", "on": "on", "radius": "rad", "equal": "eq", "distance": "d",
+_PREFIX = {"coincident": "c", "tangent": "t", "on": "on", "radius": "rad", "equal": "eq", "distance": "d", "colinear": "cl", "coradial": "cr",
            "fillet": "fillet", "chamfer": "chamfer", "sharp": "sharp"}
 
 
@@ -27,7 +27,7 @@ class FilletError(ValueError):
     pass
 
 
-class _Names:
+class Names:
     """Fresh names in the sketch's one namespace, across the operations of one batch."""
 
     def __init__(self, feature: Feature) -> None:
@@ -127,7 +127,7 @@ def fillet_ops(feature: Feature, coords: dict[str, dict[str, Any]] | None, corne
     if not isinstance(size, (int, float)) or isinstance(size, bool) or size <= 0:
         raise FilletError(f"the {'radius' if kind == 'fillet' else 'setback'} must be a positive number, got {size!r}")
     size = _num(size)
-    names = _Names(feature)
+    names = Names(feature)
     ops: list[dict[str, Any]] = []
     first: str | None = None  # the first arc or chamfer line: it carries the dimension, the others equal it
     macro_state: dict[str, dict[str, Any]] = {}  # entity -> its corners/chamfers as they will be after this batch
@@ -143,7 +143,7 @@ def fillet_ops(feature: Feature, coords: dict[str, dict[str, Any]] | None, corne
     return ops
 
 
-def _line_corner(feature: Feature, coords, spec: dict[str, str], size: float, kind: str, names: _Names,
+def _line_corner(feature: Feature, coords, spec: dict[str, str], size: float, kind: str, names: Names,
                  ops: list[dict[str, Any]], dimension: bool) -> str:
     what = f"{kind} at {spec.get('a')!r} and {spec.get('b')!r}"
     if "a" not in spec or "b" not in spec:
@@ -223,7 +223,7 @@ def _line_corner(feature: Feature, coords, spec: dict[str, str], size: float, ki
     return new
 
 
-def _macro_corner(feature: Feature, coords, spec: dict[str, str], size: float, kind: str, names: _Names,
+def _macro_corner(feature: Feature, coords, spec: dict[str, str], size: float, kind: str, names: Names,
                   ops: list[dict[str, Any]], dimension: bool, state: dict[str, dict[str, Any]]) -> str:
     entity, corner = spec.get("entity", ""), spec.get("corner", "")
     what = f"{kind} at {entity}.{corner}"
@@ -333,5 +333,5 @@ def unfillet_ops(feature: Feature, coords: dict[str, dict[str, Any]] | None, ent
     ops.append({"op": "delete_sketch_entity", "sketch": sketch, "entity": sharp})
     ops.append({"op": "set_entity_argument", "sketch": sketch, "entity": la, "kwarg": ea, "value": _round(p)})
     ops.append({"op": "set_entity_argument", "sketch": sketch, "entity": lb, "kwarg": eb, "value": _round(p)})
-    ops.append(_constraint_op(_Names(feature).next("coincident"), "coincident", [f"{la}.{ea}", f"{lb}.{eb}"], sketch))
+    ops.append(_constraint_op(Names(feature).next("coincident"), "coincident", [f"{la}.{ea}", f"{lb}.{eb}"], sketch))
     return ops

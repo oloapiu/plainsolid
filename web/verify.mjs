@@ -301,7 +301,8 @@ await page.waitForSelector('[data-testid=param-list]');
   check('a right-click on a tree row selects it and offers suppress, roll back, code and delete', (await st()).selected === 'inner' && ['suppress', 'roll back to here', 'go to code', 'delete'].every((l) => rowMenu.includes(l)), rowMenu.join(' | '));
   await page.click('[data-testid=ctx-suppress]');
   await waitForFile((t) => /fillet\("inner",.*suppressed=True/.test(t));
-  await page.waitForTimeout(400);
+  await page.waitForFunction(() => window.__plainsolid.getState().tree?.features.find((f) => f.name === 'inner')?.suppressed === true, null, { timeout: 15000 });
+  await page.waitForTimeout(200);
   const suppressed = /fillet\("inner",.*suppressed=True/.test(readFile());
   await page.click('[data-testid=feature-inner]', { button: 'right' });
   await page.waitForSelector('[data-testid=ctx-unsuppress]');
@@ -523,6 +524,47 @@ await page.waitForSelector('[data-testid=param-list]');
   check('removing the fillet deletes the arc and the sharp and joins the lines at the corner again',
     !/fillet1|sharp1/.test(usrc) && /profile\.line\("bottom", \(-30, 0\), \(30, 0\)\)/.test(usrc) && /profile\.coincident\("c\d+", "bottom.end", "right.start"\)/.test(usrc) && (await profileSol()).dof === solBefore.dof,
     usrc.match(/profile\.(line|coincident)\("(bottom|c\d+)".*/g)?.join(' | ') ?? '');
+
+  // the trim tool: a line crossing line1 and the construction line2 loses its middle piece, the pieces related to what cut them
+  h = (await st()).hash;
+  await page.evaluate(() => window.__plainsolid.actions.edit({ op: 'batch', sketch: 'profile', ops: [
+    { op: 'add_sketch_entity', sketch: 'profile', kind: 'line', name: 'cross', args: { start: [40, 30], end: [60, 30], construction: true } },
+    { op: 'add_sketch_entity', sketch: 'profile', kind: 'line', name: 'line3', args: { start: [50, 10], end: [50, 35] } }] }));
+  await waitHash(h);
+  await page.keyboard.press('t'); await page.waitForTimeout(150);
+  pm = await at(50, 25); await page.mouse.move(pm[0], pm[1]); await page.waitForTimeout(200);
+  const trimHover = (await st()).sketchMode?.hover;
+  h = (await st()).hash;
+  await clickAt(50, 25); await waitHash(h);
+  const tsrc = readFile();
+  const piece = tsrc.match(/profile\.colinear\("cl\d+", "(line\d+)", "line3"\)/)?.[1] ?? 'none';
+  check('the trim tool removes the piece between two crossings, leaving two colinear pieces related to the crossing lines',
+    trimHover === 'line3' && /profile\.line\("line3", \(50, 10\), \(50, 20\)\)/.test(tsrc) && new RegExp(`profile\\.line\\("${piece}", \\(50, 30\\), \\(50, 35\\)\\)`).test(tsrc)
+      && /profile\.coincident\("c\d+", "line3.end", "line1"\)/.test(tsrc) && new RegExp(`profile\\.coincident\\("c\\d+", "${piece}.start", "cross"\\)`).test(tsrc),
+    `hover ${trimHover} · ${tsrc.match(/profile\.(line|coincident|colinear)\("(line3|line4|c\d+|cl\d+)".*/g)?.join(' | ')}`);
+  await page.keyboard.press('Escape'); await page.waitForTimeout(100);
+  await page.locator('[data-testid=viewport] canvas').focus();
+  for (let i = 0; i < 2; i++) { h = (await st()).hash; await page.keyboard.press(process.platform === 'darwin' ? 'Meta+z' : 'Control+z'); await waitHash(h); }
+
+  // one side of a rect as construction: the panel's construction button on rect2.top writes construction=["top"]
+  h = (await st()).hash;
+  await page.evaluate(() => window.__plainsolid.actions.edit({ op: 'add_sketch_entity', sketch: 'profile', kind: 'rect', name: 'rect2', args: { width: 12, height: 8, at: [60, 60] } }));
+  await waitHash(h);
+  await page.evaluate(() => window.__plainsolid.actions.setSketchSelection(['rect2.top']));
+  await page.waitForSelector('[data-testid=constrain-construction]', { timeout: 5000 });
+  h = (await st()).hash;
+  await page.click('[data-testid=constrain-construction]'); await waitHash(h);
+  const sideOn = /profile\.rect\("rect2", 12, 8, at=\(60, 60\), construction=\["top"\]\)/.test(readFile());
+  const sideEntity = (await st()).tree.features.find((f) => f.name === 'profile').entities.find((e) => e.name === 'rect2');
+  await page.evaluate(() => window.__plainsolid.actions.setSketchSelection(['rect2.top']));
+  await page.waitForSelector('[data-testid=constrain-construction].active', { timeout: 5000 });
+  h = (await st()).hash;
+  await page.click('[data-testid=constrain-construction]'); await waitHash(h);
+  const sideOff = /profile\.rect\("rect2", 12, 8, at=\(60, 60\)\)/.test(readFile());
+  check('one side of a rect flips to construction on its own and back',
+    sideOn && sideEntity?.construction === false && sideEntity?.construction_sides?.join() === 'top' && sideOff,
+    `on ${sideOn} sides ${sideEntity?.construction_sides} off ${sideOff} · ${readFile().match(/profile\.rect\("rect2".*/)?.[0]}`);
+  for (let i = 0; i < 3; i++) { h = (await st()).hash; await page.keyboard.press(process.platform === 'darwin' ? 'Meta+z' : 'Control+z'); await waitHash(h); }
 
   // dragging a label writes its new place into the file
   const lb = await page.locator('[data-testid=dim-len1]').boundingBox();

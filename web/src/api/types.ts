@@ -12,7 +12,7 @@ export interface Param {
 
 export interface Entity {
   name: string; kind: string; args: Record<string, unknown>; arg_texts?: Record<string, string>;
-  construction: boolean; line: number | null;
+  construction: boolean; construction_sides?: string[]; line: number | null;
 }
 
 export interface Constraint {

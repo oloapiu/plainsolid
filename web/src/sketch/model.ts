@@ -8,11 +8,27 @@ export type RefKind = 'point' | 'line' | 'circle';
 
 export interface Handle { ref: string; entity: string; p: Pt; kind: 'end' | 'center' | 'mid' | 'corner' | 'point' }
 export type Curve =
-  | { ref: string; entity: string; kind: 'line'; a: Pt; b: Pt; decor?: boolean }
-  | { ref: string; entity: string; kind: 'circle'; c: Pt; r: number }
-  | { ref: string; entity: string; kind: 'arc'; c: Pt; r: number; a0: number; a1: number };
+  | { ref: string; entity: string; kind: 'line'; a: Pt; b: Pt; decor?: boolean; construction?: boolean }
+  | { ref: string; entity: string; kind: 'circle'; c: Pt; r: number; construction?: boolean }
+  | { ref: string; entity: string; kind: 'arc'; c: Pt; r: number; a0: number; a1: number; construction?: boolean };
 
-export interface EntityInfo { name: string; kind: string; construction: boolean; projected: boolean; builtin?: boolean }
+export interface EntityInfo { name: string; kind: string; construction: boolean; projected: boolean; builtin?: boolean; constructionSides?: Set<string> }
+
+export const RECT_SIDES = ['bottom', 'right', 'top', 'left'] as const;
+/** The sides of a rect or polygon, in the order the profile walks them. */
+export function sideNames(kind: string, a: Record<string, unknown>): string[] {
+  if (kind === 'rect') return [...RECT_SIDES];
+  if (kind === 'polygon') return (Array.isArray(a.points) ? a.points : []).map((_, i) => `e${i}`);
+  return [];
+}
+/** Whether a reference draws as construction: its entity, or its side of a rect or polygon. */
+export function isConstructionRef(m: SketchModel, ref: string): boolean {
+  const info = m.entities.get(entityOf(ref));
+  if (!info) return false;
+  if (info.construction) return true;
+  const part = ref.slice(info.name.length + 1);
+  return Boolean(part && info.constructionSides?.has(part));
+}
 
 /** References every sketch has without declaring them: its origin and its axes, fixed. */
 export const BUILTIN_REFS = ['origin', 'x_axis', 'y_axis'] as const;
@@ -46,7 +62,7 @@ export function buildModel(f: Feature, override?: Record<string, Record<string, 
   const entities = new Map<string, EntityInfo>();
   const conflicting = new Set<string>();
   const H = (ref: string, entity: string, p: Pt, kind: Handle['kind']) => handles.push({ ref, entity, p, kind });
-  const L = (ref: string, entity: string, a: Pt, b: Pt, decor = false) => curves.push({ ref, entity, kind: 'line', a, b, decor });
+  const L = (ref: string, entity: string, a: Pt, b: Pt, decor = false, construction = false) => curves.push({ ref, entity, kind: 'line', a, b, decor, construction });
   // the built-ins first, so user geometry drawn later paints over them
   entities.set('origin', { name: 'origin', kind: 'origin', construction: true, projected: true, builtin: true });
   entities.set('x_axis', { name: 'x_axis', kind: 'axis', construction: true, projected: true, builtin: true });
@@ -57,7 +73,8 @@ export function buildModel(f: Feature, override?: Record<string, Record<string, 
   for (const e of f.entities) {
     const a = solvedArgs(e, sol, override);
     const n = e.name;
-    entities.set(n, { name: n, kind: e.kind, construction: e.construction, projected: e.kind === 'project' || e.kind === 'offset' });
+    const cs = new Set(e.construction_sides ?? []);
+    entities.set(n, { name: n, kind: e.kind, construction: e.construction, projected: e.kind === 'project' || e.kind === 'offset', constructionSides: cs });
     switch (e.kind) {
       case 'point': H(n, n, pt(a.at), 'point'); break;
       case 'line': {
@@ -82,8 +99,8 @@ export function buildModel(f: Feature, override?: Record<string, Record<string, 
         const c = pt(a.at), w = num(a.width) / 2, h = num(a.height) / 2;
         const tl: Pt = [c[0] - w, c[1] + h], tr: Pt = [c[0] + w, c[1] + h], bl: Pt = [c[0] - w, c[1] - h], br: Pt = [c[0] + w, c[1] - h];
         H(`${n}.center`, n, c, 'center'); H(`${n}.tl`, n, tl, 'corner'); H(`${n}.tr`, n, tr, 'corner'); H(`${n}.bl`, n, bl, 'corner'); H(`${n}.br`, n, br, 'corner');
-        if (!macroOutline(handles, curves, conflicting, n, 'rect', a, ['bottom', 'right', 'top', 'left'])) {
-          L(`${n}.top`, n, tl, tr); L(`${n}.bottom`, n, bl, br); L(`${n}.left`, n, bl, tl); L(`${n}.right`, n, br, tr);
+        if (!macroOutline(handles, curves, conflicting, n, 'rect', a, [...RECT_SIDES], cs)) {
+          L(`${n}.top`, n, tl, tr, false, cs.has('top')); L(`${n}.bottom`, n, bl, br, false, cs.has('bottom')); L(`${n}.left`, n, bl, tl, false, cs.has('left')); L(`${n}.right`, n, br, tr, false, cs.has('right'));
         }
         break;
       }
@@ -103,8 +120,8 @@ export function buildModel(f: Feature, override?: Record<string, Record<string, 
       case 'polygon': {
         const pts = (Array.isArray(a.points) ? a.points : []).map((p) => pt(p));
         pts.forEach((p, i) => H(`${n}.p${i}`, n, p, 'corner'));
-        if (!macroOutline(handles, curves, conflicting, n, 'polygon', a, pts.map((_, i) => `e${i}`))) {
-          pts.forEach((p, i) => L(`${n}.e${i}`, n, p, pts[(i + 1) % pts.length]));
+        if (!macroOutline(handles, curves, conflicting, n, 'polygon', a, pts.map((_, i) => `e${i}`), cs)) {
+          pts.forEach((p, i) => L(`${n}.e${i}`, n, p, pts[(i + 1) % pts.length], false, cs.has(`e${i}`)));
         }
         break;
       }
@@ -192,7 +209,7 @@ export function macroCorners(kind: string, a: Record<string, unknown>): Record<s
 /** The outline of a macro with cut corners into the model: trimmed sides, arcs, chamfer lines
  * and their handles. False when it has no cuts (the caller draws the plain macro), true when
  * drawn; a misfit draws the sharp macro and flags the entity. */
-function macroOutline(handles: Handle[], curves: Curve[], conflicting: Set<string>, n: string, kind: string, a: Record<string, unknown>, sides: string[]): boolean {
+function macroOutline(handles: Handle[], curves: Curve[], conflicting: Set<string>, n: string, kind: string, a: Record<string, unknown>, sides: string[], cs: Set<string>): boolean {
   if (!a.corners && !a.chamfers) return false;
   const cuts = macroCorners(kind, a);
   if (!cuts) { conflicting.add(n); return false; }
@@ -201,20 +218,135 @@ function macroOutline(handles: Handle[], curves: Curve[], conflicting: Set<strin
   for (let i = 0; i < count; i++) {
     const [name, p] = pts[i], [nextName, q] = pts[(i + 1) % count];
     const start = cuts[name]?.t2 ?? p, end = cuts[nextName]?.t1 ?? q;
-    if (Math.hypot(end[0] - start[0], end[1] - start[1]) > 1e-9) curves.push({ ref: `${n}.${sides[i]}`, entity: n, kind: 'line', a: start, b: end });
+    if (Math.hypot(end[0] - start[0], end[1] - start[1]) > 1e-9) curves.push({ ref: `${n}.${sides[i]}`, entity: n, kind: 'line', a: start, b: end, construction: cs.has(sides[i]) });
     const cut = cuts[nextName];
     if (!cut) continue;
+    const construction = cs.has(sides[i]) || cs.has(sides[(i + 1) % count]);  // a cut beside a construction side is construction too
     if (cut.kind === 'arc') {
       const ref = `${n}.${nextName}_arc`, c = cut.center!, s = cut.start!, e = cut.end!;
       handles.push({ ref: `${ref}.center`, entity: n, p: c, kind: 'center' }, { ref: `${ref}.start`, entity: n, p: s, kind: 'end' }, { ref: `${ref}.end`, entity: n, p: e, kind: 'end' });
-      curves.push({ ref, entity: n, kind: 'arc', c, r: cut.size, a0: Math.atan2(s[1] - c[1], s[0] - c[0]), a1: Math.atan2(e[1] - c[1], e[0] - c[0]) });
+      curves.push({ ref, entity: n, kind: 'arc', c, r: cut.size, a0: Math.atan2(s[1] - c[1], s[0] - c[0]), a1: Math.atan2(e[1] - c[1], e[0] - c[0]), construction });
     } else {
       const ref = `${n}.${nextName}_chamfer`;
       handles.push({ ref: `${ref}.start`, entity: n, p: cut.t1, kind: 'end' }, { ref: `${ref}.end`, entity: n, p: cut.t2, kind: 'end' });
-      curves.push({ ref, entity: n, kind: 'line', a: cut.t1, b: cut.t2 });
+      curves.push({ ref, entity: n, kind: 'line', a: cut.t1, b: cut.t2, construction });
     }
   }
   return true;
+}
+
+// ---- trim: the piece of a curve under the cursor, up to the nearest crossings (mirrors trimming.py) ----
+
+const TAU = 2 * Math.PI;
+const sweepOf = (a0: number, a1: number) => { const s = ((a1 - a0) % TAU + TAU) % TAU; return s > 1e-9 ? s : TAU; };
+function onArc(c: Curve, p: Pt): boolean {
+  if (c.kind === 'circle') return true;
+  if (c.kind === 'line') return false;
+  const u = ((Math.atan2(p[1] - c.c[1], p[0] - c.c[0]) - c.a0) % TAU + TAU) % TAU;
+  return u <= sweepOf(c.a0, c.a1) + 1e-6 || u >= TAU - 1e-6;
+}
+function onSegment(c: Curve, p: Pt): boolean {
+  if (c.kind !== 'line') return false;
+  const dx = c.b[0] - c.a[0], dy = c.b[1] - c.a[1], l2 = dx * dx + dy * dy;
+  if (l2 < 1e-18) return false;
+  const t = ((p[0] - c.a[0]) * dx + (p[1] - c.a[1]) * dy) / l2;
+  return t >= -1e-6 && t <= 1 + 1e-6;
+}
+function lineLine(p: Curve, q: Curve): Pt[] {
+  if (p.kind !== 'line' || q.kind !== 'line') return [];
+  const den = (p.b[0] - p.a[0]) * (q.b[1] - q.a[1]) - (p.b[1] - p.a[1]) * (q.b[0] - q.a[0]);
+  if (Math.abs(den) < 1e-12) return [];
+  const t = ((q.a[0] - p.a[0]) * (q.b[1] - q.a[1]) - (q.a[1] - p.a[1]) * (q.b[0] - q.a[0])) / den;
+  return [[p.a[0] + t * (p.b[0] - p.a[0]), p.a[1] + t * (p.b[1] - p.a[1])]];
+}
+function lineCircle(l: Curve, c: Curve): Pt[] {
+  if (l.kind !== 'line' || c.kind === 'line') return [];
+  const dx = l.b[0] - l.a[0], dy = l.b[1] - l.a[1], fx = l.a[0] - c.c[0], fy = l.a[1] - c.c[1];
+  const A = dx * dx + dy * dy, B = 2 * (fx * dx + fy * dy), C = fx * fx + fy * fy - c.r * c.r;
+  if (A < 1e-18) return [];
+  let disc = B * B - 4 * A * C;
+  if (disc < -1e-9) return [];
+  disc = Math.max(disc, 0);
+  const ts = [...new Set([(-B - Math.sqrt(disc)) / (2 * A), (-B + Math.sqrt(disc)) / (2 * A)])];
+  return ts.map((t) => [l.a[0] + t * dx, l.a[1] + t * dy] as Pt);
+}
+function circleCircle(p: Curve, q: Curve): Pt[] {
+  if (p.kind === 'line' || q.kind === 'line') return [];
+  const d = Math.hypot(q.c[0] - p.c[0], q.c[1] - p.c[1]);
+  if (d < 1e-12 || d > p.r + q.r + 1e-9 || d < Math.abs(p.r - q.r) - 1e-9) return [];
+  const a = (p.r * p.r - q.r * q.r + d * d) / (2 * d), h = Math.sqrt(Math.max(p.r * p.r - a * a, 0));
+  const mx = p.c[0] + a * (q.c[0] - p.c[0]) / d, my = p.c[1] + a * (q.c[1] - p.c[1]) / d;
+  const rx = -(q.c[1] - p.c[1]) / d * h, ry = (q.c[0] - p.c[0]) / d * h;
+  return h < 1e-12 ? [[mx, my]] : [[mx + rx, my + ry], [mx - rx, my - ry]];
+}
+function crossings(target: Curve, other: Curve): Pt[] {
+  const pts = target.kind === 'line' ? (other.kind === 'line' ? lineLine(target, other) : lineCircle(target, other)) : other.kind === 'line' ? lineCircle(other, target) : circleCircle(target, other);
+  const inside = (c: Curve, p: Pt) => (c.kind === 'line' ? onSegment(c, p) : onArc(c, p));
+  return pts.filter((p) => inside(target, p) && inside(other, p));
+}
+function paramOf(c: Curve, p: Pt): number {
+  if (c.kind === 'line') { const dx = c.b[0] - c.a[0], dy = c.b[1] - c.a[1], l2 = dx * dx + dy * dy || 1; return ((p[0] - c.a[0]) * dx + (p[1] - c.a[1]) * dy) / l2; }
+  const ang = Math.atan2(p[1] - c.c[1], p[0] - c.c[0]);
+  return c.kind === 'arc' ? ((ang - c.a0) % TAU + TAU) % TAU : (ang % TAU + TAU) % TAU;
+}
+function pointAt(c: Curve, u: number): Pt {
+  if (c.kind === 'line') return [c.a[0] + u * (c.b[0] - c.a[0]), c.a[1] + u * (c.b[1] - c.a[1])];
+  const ang = c.kind === 'arc' ? c.a0 + u : u;
+  return [c.c[0] + c.r * Math.cos(ang), c.c[1] + c.r * Math.sin(ang)];
+}
+
+/** Whether a curve can be trimmed: a line, arc or circle of the sketch's own, not a macro's side. */
+export function trimmable(m: SketchModel, ref: string): boolean {
+  const info = m.entities.get(entityOf(ref));
+  return !!info && !info.builtin && !info.projected && (info.kind === 'line' || info.kind === 'arc' || info.kind === 'circle') && ref === info.name;
+}
+
+/** The curve under a point, curves only and the sketch's own before the built-ins. */
+export function hitCurve(m: SketchModel, p: Pt, tol: number): Curve | null {
+  for (const builtin of [false, true]) {
+    let best: Curve | null = null, bd = tol;
+    for (const c of m.curves) {
+      if (!c.ref || isBuiltin(c.ref) !== builtin) continue;
+      const d = distToCurve(c, p);
+      if (d <= bd) { best = c; bd = d; }
+    }
+    if (best) return best;
+  }
+  return null;
+}
+
+/** The piece of a curve that a trim at `at` would remove, as points to draw. */
+export function trimPiece(m: SketchModel, ref: string, at: Pt): Pt[] | null {
+  const target = curveOf(m, ref);
+  if (!target) return null;
+  const hits: number[] = [];
+  for (const other of m.curves) {
+    if (!other.ref || other.entity === target.entity) continue;
+    for (const p of crossings(target, other)) {
+      const u = paramOf(target, p);
+      if (target.kind === 'line' && !(u > 1e-6 && u < 1 - 1e-6)) continue;
+      if (target.kind === 'arc' && !(u > 1e-6 && u < sweepOf(target.a0, target.a1) - 1e-6)) continue;
+      hits.push(u);
+    }
+  }
+  hits.sort((a, b) => a - b);
+  const uc = target.kind === 'line' ? Math.max(0, Math.min(1, paramOf(target, at))) : paramOf(target, at);
+  const below = hits.filter((u) => u < uc), above = hits.filter((u) => u > uc);
+  let u0: number, u1: number;
+  if (target.kind === 'circle') {
+    if (hits.length < 2) return curvePointsOf(target);
+    u0 = below.length ? below[below.length - 1] : hits[hits.length - 1];
+    u1 = above.length ? above[0] : hits[0];
+    if (u1 <= u0) u1 += TAU;
+  } else {
+    u0 = below.length ? below[below.length - 1] : 0;
+    u1 = above.length ? above[0] : target.kind === 'line' ? 1 : sweepOf(target.a0, target.a1);
+  }
+  if (target.kind === 'line') return [pointAt(target, u0), pointAt(target, u1)];
+  const steps = Math.max(4, Math.ceil(((u1 - u0) / TAU) * 48));
+  const out: Pt[] = [];
+  for (let i = 0; i <= steps; i++) out.push(pointAt(target, u0 + ((u1 - u0) * i) / steps));
+  return out;
 }
 
 // ---- corners to fillet, fillets to remove ----------------------------------------------

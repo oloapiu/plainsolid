@@ -9,7 +9,7 @@ import contextvars
 import sys
 from typing import Any
 
-from .corners import RECT_CORNERS, corner_spec
+from .corners import RECT_CORNERS, corner_spec, side_names
 from .model import PLANES, Constraint, Document, Entity, Feature
 from .selectors import Query, Selector
 
@@ -241,8 +241,24 @@ class SketchHandle(FeatureHandle):
             raise ValueError(f"{name!r} is a built-in reference of every sketch; pick another name")
         if self._feature.entity(name) or self._feature.constraint(name):
             raise ValueError(f"duplicate name {name!r} in sketch {self._feature.name!r}")
+        sides: tuple[str, ...] = ()
+        if isinstance(construction, (str, list, tuple)):
+            # a rect or polygon may draw some of its sides as construction: construction=["top"]
+            valid = side_names(kind, args)
+            if not valid:
+                raise ValueError(f"{kind} {name!r}: construction takes True or False")
+            given = [construction] if isinstance(construction, str) else list(construction)
+            for s in given:
+                if s not in valid:
+                    raise ValueError(f"{kind} {name!r}: unknown side {s!r}; the sides are {', '.join(valid)}")
+            sides = tuple(dict.fromkeys(given))
+            construction = len(sides) == len(valid)  # every side: the whole entity
+            if construction:
+                sides = ()
+        elif not isinstance(construction, bool):
+            raise ValueError(f"{kind} {name!r}: construction takes True, False or a list of sides")
         self._feature.entities.append(
-            Entity(name=name, kind=kind, args=args, construction=construction, line=b.lineno())
+            Entity(name=name, kind=kind, args=args, construction=construction, construction_sides=sides, line=b.lineno())
         )
         return self
 
@@ -260,7 +276,7 @@ class SketchHandle(FeatureHandle):
         return self._add("arc", name, {"center": _pt(center), "start": _pt(start), "end": _pt(end)}, construction)
 
     def rect(self, name: str, width: float, height: float, *, at=(0.0, 0.0), corners=None, chamfers=None,
-             construction: bool = False) -> SketchHandle:
+             construction: Any = False) -> SketchHandle:
         """corners=8 rounds every corner, corners={"tl": 8} names them (tl, tr, br, bl);
         chamfers= the same with a setback. The corner handles stay the sharp corners."""
         args = {"width": float(width), "height": float(height), "at": _pt(at)}
@@ -272,7 +288,7 @@ class SketchHandle(FeatureHandle):
         return self._add("slot", name, {"length": float(length), "width": float(width), "at": _pt(at),
                                         "angle": float(angle)}, construction)
 
-    def polygon(self, name: str, points, *, corners=None, chamfers=None, construction: bool = False) -> SketchHandle:
+    def polygon(self, name: str, points, *, corners=None, chamfers=None, construction: Any = False) -> SketchHandle:
         """corners={"p1": 5} rounds the corner at point 1, corners=5 every corner; chamfers= the same."""
         pts = [_pt(p) for p in points]
         if len(pts) < 3:

@@ -276,6 +276,9 @@ same way (`{"expr": "body.faces.top"}`).
 | `delete_constraint` | `sketch`, `constraint` |
 | `set_constraint_value` | `sketch`, `constraint`, `value` |
 | `set_constraint_argument` | `sketch`, `constraint`, `kwarg` (`at`, `along`, `reverse`, `inside`), `value` (null drops the keyword) |
+| `fillet_corners` | `sketch`, `corners` (each `{"a": "line1.end", "b": "line2.start"}` for two line ends that meet, or `{"entity": "rect1", "corner": "tl"}`), `size`, `kind` (`fillet` or `chamfer`). Two lines get an arc (`fillet1`) or a bevel line (`chamfer1`) with coincidences and tangencies, and a virtual sharp point (`sharp1`) held on both lines where the corner was: what referenced the corner now references the sharp, a `length` on either line becomes a `distance` to it, so nothing moves. A macro corner becomes an entry of its `corners=` or `chamfers=`. The first corner gets a dimension, the others `equal` it |
+| `unfillet` | `sketch`, `entity` (`fillet1`, `chamfer1`, or a macro corner's `rect1.tl_arc` / `rect1.tl_chamfer`): takes it apart again, the lines meeting at the sharp |
+| `trim` | `sketch`, `entity` (a line, arc or circle), `at` (a point near the piece to remove): the piece under the point goes, up to the nearest crossings with any other curve (construction and converted geometry count). A cut end is related to the curve it was cut at; a line cut in the middle becomes two colinear lines, an arc two coradial arcs; a circle cut between two crossings becomes an arc of the same name; a curve with no crossing goes entirely. Relations on what was removed go, and a length on a shortened line is dropped. A rect's, polygon's or slot's sides cannot be trimmed: draw such an outline with lines |
 | `batch` | `ops`: a list of operations applied in order as one edit |
 | `replace_source` | `source`: the whole file |
 | `write_back`, `write_poses` | what the GUI uses to store solved coordinates and poses; every sketch and assembly edit already does this |

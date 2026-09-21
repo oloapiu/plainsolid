@@ -125,6 +125,7 @@ KIND_DEFAULTS = {
     ("distance", "along"): ("None",), ("angle", "reverse"): ("False",),
     # macro corners: none rounded, none bevelled
     **{(k, arg): ("None", "0", "0.0", "{}") for k in ("rect", "polygon") for arg in ("corners", "chamfers")},
+    ("rect", "construction"): ("False", "[]"), ("polygon", "construction"): ("False", "[]"),
 }
 
 

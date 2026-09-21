@@ -38,7 +38,7 @@ export function Help({ onClose }: { onClose: () => void }) {
           <div>
             <h3>sketch</h3>
             <table><tbody>
-              <Row keys={['l', 'c', 'a', 'r', 's', 'p', 'o']} what="line, circle, arc, rect, slot, polygon, point" />
+              <Row keys={['l', 'c', 'a', 'r', 's', 'p', 'o', 't']} what="line, circle, arc, rect, slot, polygon, point, trim" />
               <Row keys={['d']} what="the dimension tool: click an entity or two, click empty space to place, type the value; stays on until esc or d" />
               <Row keys={['e']} what="convert body edges, vertices or a face outline" />
               <Row keys={['x']} what="the construction switch: new geometry, converts and offsets come out as construction while it is on" />

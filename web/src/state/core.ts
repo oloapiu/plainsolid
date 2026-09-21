@@ -22,7 +22,7 @@ import type {
 import type { Corner, DimLock } from '../sketch/model';
 
 export type Plane = 'XY' | 'XZ' | 'YZ';
-export type SketchTool = 'line' | 'circle' | 'arc' | 'rect' | 'slot' | 'polygon' | 'point' | 'dimension' | 'project' | 'offset' | null;
+export type SketchTool = 'line' | 'circle' | 'arc' | 'rect' | 'slot' | 'polygon' | 'point' | 'trim' | 'dimension' | 'project' | 'offset' | null;
 export type Tool = 'none' | 'section' | 'measure' | 'move';
 export type MoveMode = 'translate' | 'rotate';
 /** Instances shown at other poses than the mesh's: the mesh pose and the previewed one, by instance name. */

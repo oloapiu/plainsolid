@@ -182,6 +182,15 @@ class Unfillet(Operation):
     entity: str
 
 
+class Trim(Operation):
+    """Remove the piece of a line, arc or circle under a point, up to the nearest crossings with
+    other curves; the cut ends are related to the curves they were cut at."""
+    op: Literal["trim"]
+    sketch: str
+    entity: str
+    at: list[float] = Field(min_length=2, max_length=2)
+
+
 class WriteBack(Operation):
     op: Literal["write_back"]
     sketch: str
@@ -266,6 +275,7 @@ EditOperation = Annotated[
     | SetConstraintArgument
     | FilletCorners
     | Unfillet
+    | Trim
     | WriteBack
     | WritePoses
     | SetEntityArgument

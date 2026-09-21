@@ -1,5 +1,5 @@
 import { api } from '../api/client';
-import { CONSTRAINT_PREFIX, takenNames } from '../sketch/model';
+import { CONSTRAINT_PREFIX, takenNames, sideNames } from '../sketch/model';
 import { set, state } from './core';
 import { edit } from './documents';
 import { fetchGhost } from './geometry';
@@ -135,17 +135,48 @@ export function toggleConstructionMode() {
   if (sm) { patchSketch({ construction: !sm.construction }); setStatus(sm.construction ? 'drawing profile geometry' : 'drawing construction geometry'); }
 }
 
-/** Flip the selected entities between construction and profile geometry, as one commit. */
+/** Flip the selection between construction and profile geometry, as one commit: a side of a rect
+ * or polygon picked in the viewport flips that side alone (construction=["top"]), anything else
+ * flips its whole entity. */
 export async function toggleConstructionSelection(): Promise<boolean> {
   const sm = state.sketchMode;
   const f = sketchFeature();
   if (!sm || !f) return false;
-  const names = [...new Set(sm.selection.map((r) => r.split('.')[0]))];
-  const ents = names.map((n) => f.entities.find((e) => e.name === n)).filter((e): e is NonNullable<typeof e> => !!e && e.kind !== 'point' && e.kind !== 'project');
-  if (!ents.length) { setStatus('select lines, circles, arcs, rects, slots or polygons'); return false; }
-  const value = !ents.every((e) => e.construction);
-  const ops: EditOp[] = ents.map((e) => ({ op: 'set_entity_argument', sketch: sm.sketch, entity: e.name, kwarg: 'construction', value }));
-  return sketchBatch(ops, `${value ? 'construction' : 'profile'}: ${ents.map((e) => e.name).join(', ')}`);
+  const sides = new Map<string, Set<string>>();  // entity -> sides picked
+  const whole = new Set<string>();
+  for (const r of sm.selection) {
+    const [n, part] = r.split('.');
+    const e = f.entities.find((x) => x.name === n);
+    if (!e || e.kind === 'point' || e.kind === 'project') continue;
+    if (part && (e.kind === 'rect' || e.kind === 'polygon') && sideNames(e.kind, e.args).includes(part)) { if (!sides.has(n)) sides.set(n, new Set()); sides.get(n)!.add(part); }
+    else whole.add(n);
+  }
+  for (const n of whole) sides.delete(n);  // the whole entity wins over one of its sides
+  if (!sides.size && !whole.size) { setStatus('select lines, circles, arcs, rects, slots or polygons'); return false; }
+  const ent = (n: string) => f.entities.find((x) => x.name === n)!;
+  const isCon = (n: string, part?: string) => ent(n).construction || (!!part && (ent(n).construction_sides ?? []).includes(part));
+  const picked = [...[...whole].map((n) => isCon(n)), ...[...sides].flatMap(([n, ps]) => [...ps].map((p) => isCon(n, p)))];
+  const value = !picked.every(Boolean);
+  const ops: EditOp[] = [];
+  for (const n of whole) ops.push({ op: 'set_entity_argument', sketch: sm.sketch, entity: n, kwarg: 'construction', value });
+  for (const [n, ps] of sides) {
+    const e = ent(n), all = sideNames(e.kind, e.args);
+    const now = new Set(e.construction ? all : e.construction_sides ?? []);
+    for (const p of ps) { if (value) now.add(p); else now.delete(p); }
+    const next: JsonValue = now.size === all.length ? true : now.size === 0 ? false : all.filter((s) => now.has(s));
+    ops.push({ op: 'set_entity_argument', sketch: sm.sketch, entity: n, kwarg: 'construction', value: next });
+  }
+  const what = [...whole, ...[...sides].flatMap(([n, ps]) => [...ps].map((p) => `${n}.${p}`))];
+  return sketchBatch(ops, `${value ? 'construction' : 'profile'}: ${what.join(', ')}`);
+}
+
+/** Trim: the piece of a line, arc or circle under a point goes, up to the nearest crossings. */
+export async function trimAt(entity: string, at: [number, number]): Promise<boolean> {
+  const sm = state.sketchMode;
+  if (!sm) return false;
+  const ok = await edit({ op: 'trim', sketch: sm.sketch, entity, at });
+  if (ok) setStatus(state.status === 'no change' ? 'nothing to trim there' : `trimmed ${entity}`);
+  return ok;
 }
 
 export function toggleSketchSelect(ref: string | null, additive: boolean) {

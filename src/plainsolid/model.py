@@ -57,6 +57,7 @@ class Entity:
     kind: str
     args: dict[str, Any]
     construction: bool = False
+    construction_sides: tuple[str, ...] = ()  # a rect's or polygon's sides drawn as construction, by name
     line: int | None = None
     arg_texts: dict[str, str] = field(default_factory=dict)
 
@@ -67,6 +68,7 @@ class Entity:
             "args": _jsonable(self.args),
             "arg_texts": dict(self.arg_texts),
             "construction": self.construction,
+            "construction_sides": list(self.construction_sides),
             "line": self.line,
         }
 

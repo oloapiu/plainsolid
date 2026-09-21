@@ -12,7 +12,7 @@ import { FeatureDialog } from './FeatureDialog';
 import { MATE_KINDS, TOOL_KINDS, VIEW_DIRECTIONS, DIMENSION_KINDS, type CompareRegion, type Constraint, type Entity, type Feature, type EditValue, type Overlay, type Tree } from '../api/types';
 import { MeasurePanel } from './MeasurePanel';
 import { ExprInput } from './ExprInput';
-import { GLYPH, buildModel, validConstraints, dimensionFor, entityOf, refKind, isBuiltin, cornersOf, removableCut, handleAt } from '../sketch/model';
+import { GLYPH, buildModel, validConstraints, dimensionFor, entityOf, refKind, isBuiltin, cornersOf, removableCut, handleAt, isConstructionRef } from '../sketch/model';
 import { subAssemblyOf, openSubAssembly } from '../menu/entries';
 
 function parseValue(text: string): EditValue {
@@ -778,7 +778,8 @@ function SketchSelected({ f }: { f: Feature }) {
   const choices = sel.length ? validConstraints(model, sel) : [];
   const plan = sel.length ? dimensionFor(model, sel) : null;
   const ents = [...new Set(sel.map(entityOf))].map((n) => model.entities.get(n)).filter((e) => e && !e.projected && e.kind !== 'point');
-  const allConstruction = ents.length > 0 && ents.every((e) => e!.construction);
+  const flippable = sel.filter((r) => { const i = model.entities.get(entityOf(r)); return !!i && !i.projected && !i.builtin && i.kind !== 'point'; });
+  const allConstruction = flippable.length > 0 && flippable.every((r) => isConstructionRef(model, r));
   const curves = sel.filter((r) => refKind(model, r) !== 'point' && !r.endsWith('.axis') && !isBuiltin(r));
   const deletable = !sel.every(isBuiltin);
   const corners = sel.length ? cornersOf(model, sel) : null;
@@ -889,7 +890,7 @@ function EntityRow({ sketch, e, ro, inSketch }: { sketch: string; e: Entity; ro:
   return (
     <div ref={ref} className={`ent-row clickable ${selected ? 'selected' : ''} ${open ? 'open' : ''}`} data-testid={`entity-${e.name}`} onClick={onClick}
          onMouseEnter={() => inSketch && setSketchHighlight([e.name])} onMouseLeave={() => inSketch && setSketchHighlight([])}>
-      <span className="ent-kind">{e.kind}{e.construction ? ' (c)' : ''}</span>
+      <span className="ent-kind">{e.kind}{e.construction ? ' (c)' : e.construction_sides?.length ? ` (c: ${e.construction_sides.join(', ')})` : ''}</span>
       <span className="ent-name">{e.name}</span>
       {!open && <span className="ent-summary">{entitySummary(e)}</span>}
       {open && <span />}
