@@ -124,6 +124,30 @@ class PolarPoint(PointRef):
 
 
 @dataclass
+class RigidPoint(PointRef):
+    """base + R(t) (lx, ly) with t a variable: a point of an imported DXF outline, which
+    moves and turns as one piece about the file's origin."""
+
+    base: PointRef
+    it: int
+    lx: float
+    ly: float
+
+    def pos(self, x):
+        bx, by = self.base.pos(x)
+        c, s = math.cos(x[self.it]), math.sin(x[self.it])
+        return (float(bx + c * self.lx - s * self.ly), float(by + s * self.lx + c * self.ly))
+
+    def jac(self, x):
+        jx, jy = self.base.jac(x)
+        jx, jy = dict(jx), dict(jy)
+        c, s = math.cos(x[self.it]), math.sin(x[self.it])
+        jx[self.it] = jx.get(self.it, 0.0) - s * self.lx - c * self.ly
+        jy[self.it] = jy.get(self.it, 0.0) + c * self.lx - s * self.ly
+        return (jx, jy)
+
+
+@dataclass
 class DerivedPoint(PointRef):
     """A point computed from some variables by any function, differentiated numerically:
     the centre and tangent points of a polygon corner's fillet, which depend on three

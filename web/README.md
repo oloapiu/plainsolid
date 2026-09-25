@@ -66,8 +66,13 @@ See [src/state/README.md](src/state/README.md) for module ownership and request-
 ## Documents
 
 - Open documents are tabs in the top bar, each with a close button (middle-click closes too).
-- "open ▾" lists the project's documents, recent first, then parts, assemblies, drawings and STEP
-  files, with a filter; enter opens the first match or a typed path. A STEP file opens as a viewer.
+- "open ▾" lists the project's documents, recent first, then parts, assemblies, drawings, STEP and
+  DXF files, with a filter; enter opens the first match or a typed path. A STEP file opens as a viewer;
+  a DXF file asks whether it opens as a part (a sketch of its curves, opened for editing the first
+  time) or as a drawing.
+- A STEP or DXF file dropped on the window, or named by `plainsolid open` from outside the project, goes
+  through the import dialog: folder and name inside the project, and for a DXF the part-or-drawing
+  choice (remembered for the next one). The file is copied, never moved.
 - "new ▾" creates a part, an assembly or a drawing (asking for its model) next to the current one.
 - "file ▾" holds snapshot (a PNG, saved and copied to the clipboard), export (STEP for a part or
   assembly; PDF, DXF or SVG for a drawing, by suffix) and the compare commands.

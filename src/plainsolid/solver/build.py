@@ -66,6 +66,7 @@ class Layout:
         self.extract: dict[str, Any] = {}  # entity -> callable(x) -> solved args
         self.kinds: dict[str, str] = {}
         self.var_names: dict[int, str] = {}  # variable index -> "center.x", "width", "angle", ... for reports
+        self.posers: dict[str, Any] = {}  # DXF imports: callable(x) -> their curves where the solution puts them
 
     def name_vars(self, **named: int | S.PointRef) -> None:
         """Record what each variable of an entity means, a point contributing .x and .y."""
@@ -196,6 +197,8 @@ def _add_entity(lay: Layout, e: Entity, projected: dict[str, Projected]) -> None
                 _add_const_item(lay, nm, item)
         lay.entity_vars[n] = []
         lay.extract[n] = lambda x: {}
+    elif e.kind == "import_dxf":
+        _add_dxf(lay, e, projected)
     else:
         raise SketchError(f"unknown entity kind {e.kind!r}")
     lay.kinds[n] = e.kind
@@ -289,6 +292,61 @@ def _polygon_corners(lay: Layout, e: Entity, a: dict, pts: list[S.FreePoint]) ->
         start, end = derived(i, v, "t1", False), derived(i, v, "t2", False)
         lay.refs[f"{n}.{k}_chamfer"] = S.LineRef(start, end)
         lay.refs[f"{n}.{k}_chamfer.start"], lay.refs[f"{n}.{k}_chamfer.end"] = start, end
+
+
+def _add_dxf(lay: Layout, e: Entity, projected: dict[str, Projected]) -> None:
+    """A DXF outline as one rigid piece: three variables (where the file's origin lands and the
+    angle), every curve's points turning with them. The items arrive placed where the file's
+    `at` and `angle` put them; they are taken back to the file's own frame here."""
+    n = e.name
+    pr = projected.get(n)
+    if pr is None:
+        raise SketchError(f"import_dxf {n!r} was not read")
+    sy = lay.system
+    at0 = tuple(e.args.get("at") or (0.0, 0.0))
+    t0 = math.radians(float(e.args.get("angle") or 0.0))
+    c = sy.point(float(at0[0]), float(at0[1]))
+    t = sy.var(t0)
+    cos0, sin0 = math.cos(t0), math.sin(t0)
+
+    def rigid(p) -> S.RigidPoint:
+        dx, dy = p[0] - at0[0], p[1] - at0[1]
+        return S.RigidPoint(c, t, cos0 * dx + sin0 * dy, -sin0 * dx + cos0 * dy)
+
+    local: list[tuple[str, dict[str, Any]]] = []
+    for i, item in enumerate(pr.items):
+        k = item.coords
+        names = [n] if len(pr.items) == 1 else [f"{n}.e{i}"]
+        if len(pr.items) > 1 and i == 0:
+            names.append(n)
+        pts = {key: rigid(k[key]) for key in ("start", "end", "center", "at") if key in k}
+        for nm in names:
+            if item.kind == "line":
+                lay.refs[nm] = S.LineRef(pts["start"], pts["end"])
+                lay.refs[f"{nm}.start"], lay.refs[f"{nm}.end"] = pts["start"], pts["end"]
+                lay.refs[f"{nm}.mid"] = S.MidPoint(pts["start"], pts["end"])
+            elif item.kind in ("circle", "arc"):
+                lay.refs[nm] = S.CircleRef(pts["center"], S.ConstScalar(k["radius"]))
+                lay.refs[f"{nm}.center"] = pts["center"]
+                if item.kind == "arc":
+                    lay.refs[f"{nm}.start"], lay.refs[f"{nm}.end"] = pts["start"], pts["end"]
+            elif item.kind == "point":
+                lay.refs[nm] = pts["at"]
+        local.append((item.kind, {key: (v.lx, v.ly) for key, v in pts.items()} | ({"radius": k["radius"]} if "radius" in k else {})))
+    lay.refs[f"{n}.origin"] = c
+    lay.entity_vars[n] = [c.ix, c.iy, t]
+    lay.name_vars(at=c, angle=t)
+    lay.extract[n] = lambda x, c=c, t=t: {"at": c.pos(x), "angle": math.degrees(float(x[t]))}
+
+    def pose(x, c=c, t=t, local=local) -> Projected:
+        (cx, cy), a = c.pos(x), float(x[t])
+        co, si = math.cos(a), math.sin(a)
+        items = []
+        for kind, k in local:
+            items.append(ProjItem(kind, {key: ((cx + co * v[0] - si * v[1], cy + si * v[0] + co * v[1]) if key != "radius" else v)
+                                         for key, v in k.items()}))
+        return Projected(n, items)
+    lay.posers[n] = pose
 
 
 def _add_const_item(lay: Layout, name: str, item: ProjItem) -> None:
@@ -459,7 +517,7 @@ def _fix_parts(lay: Layout, target: str, x0: np.ndarray, what: str) -> list[S.Co
     ref = lay.refs.get(target)
     kind = lay.kinds.get(target)
     parts: list[S.Constraint] = []
-    if kind in ("rect", "slot", "polygon", "arc", "line", "circle", "point") and "." not in target:
+    if kind in ("rect", "slot", "polygon", "arc", "line", "circle", "point", "import_dxf") and "." not in target:
         for v in lay.entity_vars[target]:
             if lay.var_names.get(v, "").endswith(("_r", "_chamfer")):
                 continue  # a macro's corner sizes are dimensioned, not pinned with its place and size
@@ -529,6 +587,12 @@ def solve_sketch(feature: Feature, projected: dict[str, Projected] | None = None
                 scalars.append(_rim_target(circle, float(tx), float(ty)))
                 targets.append((circle.center, circle.center.pos(base.x)))
                 continue
+            entity = name.split(".")[0]
+            if lay.kinds.get(entity) == "import_dxf" and name != f"{entity}.origin":
+                # a DXF outline dragged by one of its points moves as a whole, without turning
+                (px, py), (ox, oy) = lay.point(name, f"drag {name!r}").pos(base.x), lay.refs[f"{entity}.origin"].pos(base.x)
+                targets.append((lay.refs[f"{entity}.origin"], (ox + float(tx) - px, oy + float(ty) - py)))
+                continue
             targets.append((lay.point(name, f"drag {name!r}"), (float(tx), float(ty))))
         sol = sy.drag(base.x, targets, scalars=scalars)
     else:
@@ -538,5 +602,6 @@ def solve_sketch(feature: Feature, projected: dict[str, Projected] | None = None
     free_entities = [name for name, vars_ in lay.entity_vars.items() if any(v in free_vars for v in vars_)]
     free_variables = {name: [lay.var_names.get(v, f"v{v}") for v in lay.entity_vars[name] if v in free_vars]
                       for name in free_entities}
+    placed = {**(projected or {}), **{name: pose(sol.x) for name, pose in lay.posers.items()}}
     return SketchSolution(coords, sol.dof, sol.rank, sol.redundant, sol.conflicting, sol.residual,
-                          free_entities, dict(projected or {}), sol.ms, free_variables)
+                          free_entities, placed, sol.ms, free_variables)

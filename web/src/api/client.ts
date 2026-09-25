@@ -1,4 +1,4 @@
-import type { DocSummary, DragResult, EditOp, EditResult, MeasureRef, MeasureResult, Overlay, PreviewResult, ProjectFile, SectionSpec, SketchSolution, Tree, ViewsState, WorkspaceEvent, WsEvent } from './types';
+import type { DocSummary, DragResult, DxfMode, EditOp, EditResult, MeasureRef, MeasureResult, Overlay, PreviewResult, ProjectFile, SectionSpec, SketchSolution, Tree, ViewsState, WorkspaceEvent, WsEvent } from './types';
 import { parseMesh, type ParsedMesh } from './mesh';
 
 export class ApiError extends Error {
@@ -62,7 +62,7 @@ export const api = {
   files: () => fetch('/api/files').then(json<{ root: string; files: ProjectFile[] }>),
   closeDocument: (id: string) => post(`/api/documents/${id}/close`, {}).then(json<{ closed: string; documents: DocSummary[] }>),
   export: (id: string, format: string, path: string) => post(`/api/documents/${id}/export`, { format, path }).then(json<{ path: string; format: string }>),
-  openDocument: (path: string) => post('/api/documents/open', { path }).then(json<Tree>),
+  openDocument: (path: string, mode?: DxfMode) => post('/api/documents/open', { path, ...(mode ? { mode } : {}) }).then(json<Tree>),
   newDocument: (path: string, kind: 'part' | 'assembly' | 'drawing' = 'part', of?: string) => post('/api/documents/new', { path, kind, ...(of ? { of } : {}) }).then(json<Tree>),
   tree: (id: string) => fetch(`/api/documents/${id}/tree`).then(json<Tree>),
   source: (id: string) => fetch(`/api/documents/${id}/source`).then(json<{ source: string; hash: string; path: string }>),
@@ -106,8 +106,8 @@ export const api = {
   putViews: (id: string, views: Partial<ViewsState>) => put(`/api/documents/${id}/views`, { views }).then(json<ViewsState>),
   events: (id: string, onEvent: (e: WsEvent) => void) => subscribe<WsEvent>(`/api/documents/${id}/events`, onEvent),
   workspaceEvents: (onEvent: (e: WorkspaceEvent) => void) => subscribe<WorkspaceEvent>('/api/events', onEvent),
-  importFile: (source: string, folder: string, name: string) => post('/api/documents/import', { source, folder, name }).then(json<Tree>),
-  uploadFile: (file: Blob, folder: string, name: string, suffix: string) =>
-    fetch(`/api/documents/upload?${new URLSearchParams({ folder, name, suffix })}`, { method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: file }).then(json<Tree>),
+  importFile: (source: string, folder: string, name: string, mode?: DxfMode) => post('/api/documents/import', { source, folder, name, ...(mode ? { mode } : {}) }).then(json<Tree>),
+  uploadFile: (file: Blob, folder: string, name: string, suffix: string, mode?: DxfMode) =>
+    fetch(`/api/documents/upload?${new URLSearchParams({ folder, name, suffix, ...(mode ? { mode } : {}) })}`, { method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: file }).then(json<Tree>),
   shutdown: () => post('/api/shutdown', {}).then(json<{ stopping: boolean }>),
 };

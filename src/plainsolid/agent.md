@@ -15,7 +15,7 @@ a **drawing** (views of a part or assembly with dimensions and notes).
 **The CLI**, one process per command, in the project directory:
 
 ```
-plainsolid new FILE [--kind assembly | --kind drawing --of MODEL] [--name N] [--material M]
+plainsolid new FILE [--kind assembly | --kind drawing --of MODEL|FILE.dxf] [--name N] [--material M]
 plainsolid tree FILE                     features, parameters, results, errors (JSON)
 plainsolid edit FILE 'OP_JSON' [--dry-run]   one edit operation, or @ops.json
 plainsolid query FILE [summary|volume|area|bbox|counts|center_of_mass|mass|bom|interference] [--upto F]
@@ -126,9 +126,14 @@ tree reports every sketch's frame as `result.plane` (`origin`, `x_dir`,
 | polygon | `s.polygon("p", [(x, y), ...], corners={"p1": 5})` | `p.p0`, `p.p1`, ... points, `p.e0`, `p.e1`, ... edges; `corners=` and `chamfers=` by point name as for rect, giving `p.p1_arc` and `p.p1_chamfer` |
 | project | `s.project("e1", body.edges.nearest((x, y, z)))` a body edge, vertex or face outline, fixed, follows the body; construction unless `construction=False` | `e1`, and `e1.start`, `e1.end`, `e1.center` as the geometry allows |
 | offset | `s.offset("o1", ["l1", "a1"], 2, side="outside"|"inside"|"left"|"right", corners="sharp"|"round")` | `o1.e0`, `o1.e1`, ... |
+| import_dxf | `s.import_dxf("outline", "plate.dxf", layer="CUT", at=(0, 0), angle=0)` the lines, arcs and circles of a DXF file (relative to this file, in mm from its units), one rigid piece: `at` is where the file's origin lands, `angle` turns it; profile geometry | `outline.e0`, `outline.e1`, ... (with `.start`, `.end`, `.mid`, `.center`), `outline.origin` |
 
 Every entity accepts `construction=True`. Rect, slot and polygon are rigid
-macros: their sides and points are references, not separate entities.
+macros: their sides and points are references, not separate entities. A DXF
+import has three degrees of freedom (`at` and `angle`): `fix("placed",
+"outline")` pins it where it is, or relate its references
+(`coincident("c", "outline.e5.center", "origin")`). The tree's sketch
+warnings say when its outline does not close, and where the gaps are.
 
 Constraints, each `s.kind("name", refs..., value)`:
 
@@ -253,6 +258,11 @@ on a dimension or note it is relative to the view's centre. One reference
 gives a diameter (or `kind="radius"`), two a distance (`along="x"|"y"`) or,
 with `kind="angle"`, an angle. Export to `svg`, `dxf` or `pdf`.
 
+`view("old", dxf="old.dxf", at=(148, 117))` shows a DXF file as it is (its
+curves, text and dimensions, `layer=` to pick layers), its extents centred on
+`at`. A drawing of DXF views alone has no `of=`. Notes can sit on a DXF view;
+dimensions cannot.
+
 ## Edit operations
 
 Every operation is a JSON object with `op`, plus an optional `hash`. A value
@@ -277,6 +287,7 @@ same way (`{"expr": "body.faces.top"}`).
 | `set_constraint_value` | `sketch`, `constraint`, `value` |
 | `set_constraint_argument` | `sketch`, `constraint`, `kwarg` (`at`, `along`, `reverse`, `inside`), `value` (null drops the keyword) |
 | `fillet_corners` | `sketch`, `corners` (each `{"a": "line1.end", "b": "line2.start"}` for two line ends that meet, or `{"entity": "rect1", "corner": "tl"}`), `size`, `kind` (`fillet` or `chamfer`). Two lines get an arc (`fillet1`) or a bevel line (`chamfer1`) with coincidences and tangencies, and a virtual sharp point (`sharp1`) held on both lines where the corner was: what referenced the corner now references the sharp, a `length` on either line becomes a `distance` to it, so nothing moves. A macro corner becomes an entry of its `corners=` or `chamfers=`. The first corner gets a dimension, the others `equal` it |
+| `convert_dxf` | `sketch`, `entity` (an `import_dxf`): its curves become `line`, `arc` and `circle` entities named `outline_0`, `outline_1`, ... where they stand, with coincidents where ends meet. Relations on its curves (`outline.e3`) move to the new entities; those on the import as a whole (`fix`, `outline.origin`) go, so the new geometry is free. At most 300 curves |
 | `unfillet` | `sketch`, `entity` (`fillet1`, `chamfer1`, or a macro corner's `rect1.tl_arc` / `rect1.tl_chamfer`): takes it apart again, the lines meeting at the sharp |
 | `trim` | `sketch`, `entity` (a line, arc or circle), `at` (a point near the piece to remove): the piece under the point goes, up to the nearest crossings with any other curve (construction and converted geometry count). A cut end is related to the curve it was cut at; a line cut in the middle becomes two colinear lines, an arc two coradial arcs; a circle cut between two crossings becomes an arc of the same name; a curve with no crossing goes entirely. Relations on what was removed go, and a length on a shortened line is dropped. A rect's, polygon's or slot's sides cannot be trimmed: draw such an outline with lines |
 | `batch` | `ops`: a list of operations applied in order as one edit |

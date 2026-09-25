@@ -1,9 +1,9 @@
 // The top bar's "open ▾" and "new ▾": a popover listing the project's documents (recent first,
-// then parts, assemblies, drawings and STEP files) with a filter, and a popover that creates a
+// then parts, assemblies, drawings, STEP and DXF files) with a filter, and a popover that creates a
 // part, an assembly or a drawing from a name and, for a drawing, the model it shows.
 import { useEffect, useRef, useState } from 'react';
 import { useStore, openDocument, newDocument, refreshFiles, setOverlay, getState, importNext, skipImport } from './state/store';
-import type { ProjectFile } from './api/types';
+import type { DxfMode, ProjectFile } from './api/types';
 
 const RECENT_KEY = 'plainsolid.recent';
 const readRecent = (): string[] => { try { return JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]') as string[]; } catch { return []; } };
@@ -33,7 +33,7 @@ function useCloser(open: boolean, close: () => void) {
   return ref;
 }
 
-const KINDS: [ProjectFile['kind'], string][] = [['part', 'parts'], ['assembly', 'assemblies'], ['drawing', 'drawings'], ['step', 'STEP files']];
+const KINDS: [ProjectFile['kind'], string][] = [['part', 'parts'], ['assembly', 'assemblies'], ['drawing', 'drawings'], ['step', 'STEP files'], ['dxf', 'DXF files']];
 
 export function OpenMenu({ compare, onCompareDone, openSignal }: { compare: boolean; onCompareDone: () => void; openSignal: number }) {
   const files = useStore((s) => s.files);
@@ -56,7 +56,7 @@ export function OpenMenu({ compare, onCompareDone, openSignal }: { compare: bool
   const submit = () => { if (visible.length) choose(visible[0].path); else if (filter.trim()) choose(filter.trim()); };
   const row = (f: ProjectFile, key: string) => (
     <button key={key} className="files-row" data-testid={`file-${f.path}`} onClick={() => choose(f.path)} title={f.path}>
-      <span className="mono">{f.path}</span><span className="files-kind">{f.kind === 'step' ? 'STEP' : f.kind}</span>
+      <span className="mono">{f.path}</span><span className="files-kind">{f.kind === 'step' ? 'STEP' : f.kind === 'dxf' ? 'DXF' : f.kind}</span>
     </button>
   );
   return (
@@ -73,7 +73,7 @@ export function OpenMenu({ compare, onCompareDone, openSignal }: { compare: bool
             return list.length ? <div key={kind}><div className="files-group">{label}</div>{list.map((f) => row(f, f.path))}</div> : null;
           })}
           {!visible.length && <div className="panel-help">{q ? 'no file matches · enter opens the typed path if it exists' : 'no documents in the project yet'}</div>}
-          {mode === 'open' && <div className="panel-help">a STEP file opens as a viewer · drop one from outside the project on the window to copy it in</div>}
+          {mode === 'open' && <div className="panel-help">a STEP file opens as a viewer, a DXF file as a part or a drawing · drop one from outside the project on the window to copy it in</div>}
         </div>
       )}
     </span>
@@ -84,7 +84,7 @@ type NewKind = 'part' | 'assembly' | 'drawing';
 const HELP: Record<NewKind, string> = {
   part: 'an empty part; the file goes next to the current document',
   assembly: 'an empty assembly; then add instances of parts and STEP files',
-  drawing: 'a sheet with four third-angle views of the model',
+  drawing: 'a sheet with four third-angle views of the model, or one DXF file as it is',
 };
 
 export function NewMenu() {
@@ -97,7 +97,7 @@ export function NewMenu() {
   const close = () => setOpen(false);
   const ref = useCloser(open, close);
   useEffect(() => { if (open) { void refreshFiles(); setKind(null); } }, [open]);
-  const models = files.filter((f) => f.kind === 'part' || f.kind === 'assembly');
+  const models = files.filter((f) => f.kind === 'part' || f.kind === 'assembly' || f.kind === 'dxf');  // a DXF drawing shows the file itself
   const pickKind = (k: NewKind) => {
     setKind(k);
     const cur = currentRel();
@@ -149,6 +149,12 @@ export function NewMenu() {
 }
 
 const FOLDER_KEY = 'plainsolid.importFolder';
+const DXF_MODE_KEY = 'plainsolid.dxfMode';
+const DXF_MODES: [DxfMode, string, string][] = [
+  ['part', 'part', 'a sketch with the DXF\'s curves; extrude or cut it from there'],
+  ['drawing', 'drawing', 'a sheet showing the DXF as it is, with a title block; add notes to it'],
+];
+const readDxfMode = (): DxfMode => { try { return localStorage.getItem(DXF_MODE_KEY) === 'drawing' ? 'drawing' : 'part'; } catch { return 'part'; } };
 /** Where a STEP file from outside goes: proposals/ next to the current document, that folder itself
  * when the document already sits in proposals/ or vendor/, else the last folder used, else proposals/. */
 function defaultImportFolder(): string {
@@ -162,8 +168,9 @@ function defaultImportFolder(): string {
   try { return localStorage.getItem(FOLDER_KEY) ?? 'proposals'; } catch { return 'proposals'; }
 }
 
-/** One STEP file from outside the project at a time: the folder and name it gets inside, then a
- * copy is made and opened. The original stays where it was. */
+/** One STEP or DXF file from outside the project at a time: the folder and name it gets inside, then
+ * a copy is made and opened. The original stays where it was. A DXF file also asks how it opens, as a
+ * part or as a drawing; one already in the project asks only that. */
 export function ImportDialog() {
   const imports = useStore((s) => s.imports);
   const files = useStore((s) => s.files);
@@ -171,13 +178,51 @@ export function ImportDialog() {
   const [folder, setFolder] = useState('');
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
+  const [mode, setMode] = useState<DxfMode>(readDxfMode);
   useEffect(() => {
     if (!item) return;
     setName(item.name);
     setFolder(defaultImportFolder());
     setBusy(false);
+    setMode(readDxfMode());
   }, [item]);
   if (!item) return null;
+  const dxf = /^\.dxf$/i.test(item.suffix);
+  const modeRow = dxf && (
+    <>
+      <div className="files-field"><span>open as</span>
+        <div className="btn-row">
+          {DXF_MODES.map(([m, label]) => (
+            <button key={m} type="button" className={`btn-small ${mode === m ? 'active' : ''}`} onClick={() => setMode(m)} data-testid={`import-mode-${m}`}>{label}</button>
+          ))}
+        </div>
+      </div>
+      <div className="panel-help" data-testid="import-mode-help">{DXF_MODES.find(([m]) => m === mode)?.[2]}</div>
+    </>
+  );
+  const rememberMode = () => { try { localStorage.setItem(DXF_MODE_KEY, mode); } catch { /* fine */ } };
+  if (item.path !== undefined) {
+    const existing = files.find((f) => f.path === item.path)?.[mode];
+    const open = async () => {
+      if (busy) return;
+      setBusy(true);
+      if (await importNext('', item.name, mode)) rememberMode();
+      else setBusy(false);
+    };
+    return (
+      <div className="import-pop" data-testid="import-pop" role="dialog" onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); skipImport(); } }}>
+        <div className="files-title">open {item.path}{imports.length > 1 ? ` · ${imports.length - 1} more waiting` : ''}</div>
+        <form onSubmit={(e) => { e.preventDefault(); void open(); }}>
+          {modeRow}
+          <div className="panel-help">{existing ? `opens ${existing}, written the first time` : `writes ${item.path.replace(/\.dxf$/i, mode === 'part' ? '.py' : '_dwg.py')} next to the DXF and opens it`}</div>
+          <div className="btn-row">
+            <button className="btn-small" type="submit" autoFocus disabled={busy} data-testid="import-go">{busy ? 'opening…' : 'open'}</button>
+            <button className="btn-small" type="button" onClick={skipImport} data-testid="import-skip">{imports.length > 1 ? 'skip' : 'cancel'}</button>
+          </div>
+        </form>
+      </div>
+    );
+  }
   const folders = [...new Set([...files.map((f) => (f.path.includes('/') ? f.path.slice(0, f.path.lastIndexOf('/')) : '')), 'proposals', 'vendor'])].filter(Boolean).sort();
   const dir = folder.trim().replace(/^\/+|\/+$/g, '');
   const target = `${dir ? `${dir}/` : ''}${name.trim()}${item.suffix}`;
@@ -185,7 +230,7 @@ export function ImportDialog() {
   const submit = async () => {
     if (!name.trim() || taken || busy) return;
     setBusy(true);
-    if (await importNext(dir, name.trim())) { try { localStorage.setItem(FOLDER_KEY, dir); } catch { /* fine */ } }
+    if (await importNext(dir, name.trim(), dxf ? mode : undefined)) { try { localStorage.setItem(FOLDER_KEY, dir); } catch { /* fine */ } if (dxf) rememberMode(); }
     else setBusy(false);
   };
   return (
@@ -195,6 +240,7 @@ export function ImportDialog() {
         <label className="files-field"><span>folder</span><input list="import-folders" value={folder} onChange={(e) => setFolder(e.target.value)} spellCheck={false} data-testid="import-folder" /></label>
         <datalist id="import-folders">{folders.map((f) => <option key={f} value={f} />)}</datalist>
         <label className="files-field"><span>name</span><input autoFocus value={name} onChange={(e) => setName(e.target.value)} spellCheck={false} data-testid="import-name" /></label>
+        {modeRow}
         <div className="panel-help">copied to {target} and opened{taken ? ' · that file exists already' : ''}; the original stays where it is</div>
         <div className="btn-row">
           <button className="btn-small" type="submit" disabled={!name.trim() || taken || busy} data-testid="import-go">{busy ? 'importing…' : 'import'}</button>

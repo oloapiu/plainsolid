@@ -20,6 +20,11 @@ Dimensions take one or two references through the view handle
 distance (points, parallel lines, a point and a line, circle centres),
 diameter, radius and angle. Notes are text on the sheet or beside a view.
 
+A view with `dxf="old.dxf"` shows a DXF file as it is instead of the model
+(see plainsolid.dxfimport): its curves, text, dimensions and fills, the file's
+extents centred on `at`. A drawing whose views are all DXF views needs no
+model (`of`); dimensions measure model views only.
+
 Everything after projection is one 2D scene in sheet millimetres (`layout`),
 which the client draws and the three exporters render; the visible segments
 of a plain view carry the selector of the model edge they came from, so a
@@ -41,6 +46,7 @@ from OCP.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Surface
 from OCP.GeomAbs import GeomAbs_SurfaceType
 
 from . import assembly as pasm
+from . import dxfimport as pdxf
 from .dependencies import file_dependencies
 from .selectors import Identity, Selector, SelectorError, resolve
 from .sketchgeom import STANDARD_PLANES
@@ -189,11 +195,15 @@ def _load_model(path: Path, key: tuple[str, int, int]) -> Model:
                  pasm._measure(ev.body)[0], [str(path)], [key])
 
 
+def has_model(doc) -> bool:
+    return bool(doc.meta.get("of"))
+
+
 def model_path(doc) -> Path:
     """Where the drawing's `meta(of=...)` points, relative to the drawing file."""
     rel = doc.meta.get("of")
     if not rel or not isinstance(rel, str):
-        raise DrawingError('a drawing names its model: meta(kind="drawing", of="part.py")')
+        raise DrawingError('a drawing of a model names it: meta(kind="drawing", of="part.py"); a DXF view needs none')
     p = Path(rel)
     if not p.is_absolute():
         base = Path(doc.path).parent if doc.path else Path.cwd()
@@ -203,6 +213,8 @@ def model_path(doc) -> Path:
 
 def model_signature(doc) -> str:
     """What the prefix cache keys the views on: the model's file keys."""
+    if not has_model(doc):
+        return "no model"
     try:
         m = load_model(model_path(doc))
     except DrawingError as exc:
@@ -487,6 +499,10 @@ class ViewResult:
     plane: Plane | None = None
     look_from: np.ndarray | None = None
     warnings: list[str] = field(default_factory=list)
+    dxf: str | None = None  # a DXF view: the file it shows, as the statement names it
+    annotation: list[Seg] = field(default_factory=list)  # a DXF's dimension and leader lines
+    texts: list[dict[str, Any]] = field(default_factory=list)  # a DXF's text, view coordinates
+    fills: list[list[tuple[float, float]]] = field(default_factory=list)  # a DXF's filled areas
 
     @property
     def center(self) -> tuple[float, float]:
@@ -504,6 +520,33 @@ class ViewResult:
     def seg_to_sheet(self, seg: Seg) -> Seg:
         cx, cy = self.center
         return seg.transformed(self.scale, self.at[0] - cx * self.scale, self.at[1] - cy * self.scale)
+
+
+def _dxf_seg(t: tuple) -> Seg:
+    if t[0] in ("line", "poly"):
+        return Seg(t[0], [tuple(p) for p in t[1]])
+    if t[0] == "circle":
+        return Seg("circle", center=tuple(t[1]), radius=float(t[2]))
+    return Seg("arc", center=tuple(t[1]), radius=float(t[2]), a0=float(t[3]), a1=float(t[4]))
+
+
+def build_dxf_view(path: Path, name: str, args: dict[str, Any], sheet_scale_: float) -> ViewResult:
+    """A DXF file on the sheet as it is: its extents centred on `at`, at the view's scale."""
+    what = f"view {name!r}"
+    at = _xy(args.get("at", (0.0, 0.0)), what)
+    scale = float(args["scale"]) if args.get("scale") is not None else sheet_scale_
+    if scale <= 0:
+        raise DrawingError(f"{what}: scale must be positive")
+    try:
+        sheet = pdxf.read_sheet(path, args.get("layer"))
+    except pdxf.DxfError as exc:
+        raise DrawingError(f"{what}: {exc}") from None
+    frame = Frame(np.zeros(3), np.array([1.0, 0.0, 0.0]), np.array([0.0, 1.0, 0.0]), np.array([0.0, 0.0, 1.0]))
+    return ViewResult(name, "dxf", at, scale, bool(sheet.dashed), None, 0.0, False, frame, None,
+                      [_dxf_seg(t) for t in sheet.visible], [_dxf_seg(t) for t in sheet.dashed],
+                      [_dxf_seg(t) for t in sheet.hatch], sheet.bbox, warnings=list(sheet.warnings),
+                      dxf=str(args["dxf"]), annotation=[_dxf_seg(t) for t in sheet.annotation],
+                      texts=list(sheet.texts), fills=[list(p) for p in sheet.fills])
 
 
 def _section_plane(model: Model, section: Any, offset: float, what: str) -> Plane:
@@ -956,7 +999,7 @@ def _angular(A: Ref2D, B: Ref2D, at: np.ndarray, what: str) -> tuple[float, DimR
                             _label(text_at, ""), tuple(at))
 
 
-def build_dimension(model: Model, name: str, args: dict[str, Any], views: dict[str, ViewResult]) -> DimResult:
+def build_dimension(model: Model | None, name: str, args: dict[str, Any], views: dict[str, ViewResult]) -> DimResult:
     what = f"dimension {name!r}"
     a, b = args.get("a"), args.get("b")
     if not a:
@@ -965,6 +1008,10 @@ def build_dimension(model: Model, name: str, args: dict[str, Any], views: dict[s
     view = views.get(sel_a.feature)
     if view is None:
         raise DrawingError(f"{what}: {sel_a.ref_name} refers to {sel_a.feature!r}, which is not a view above it that evaluated")
+    if view.dxf:
+        raise DrawingError(f"{what}: view {view.name!r} shows {view.dxf}; dimensions measure model views, a note can label it")
+    if model is None:
+        raise DrawingError(f"{what}: there is no model to measure (meta(of=...))")
     if b is not None and Selector.from_json(b["selector"]).feature != view.name:
         raise DrawingError(f"{what}: both references must be in view {view.name!r}")
     kind = args.get("kind") or ("distance" if b is not None else "diameter")
@@ -1049,7 +1096,8 @@ def _scale_text(scale: float) -> str:
     return f"{_num(scale)}:1" if scale >= 1 else f"1:{_num(1 / scale)}"
 
 
-def _title_block(width: float, height: float, meta: dict[str, Any], model: Model | None, scale: float, sheet: str):
+def _title_block(width: float, height: float, meta: dict[str, Any], model: Model | None, scale: float, sheet: str,
+                 sources: list[str] | None = None):
     lines: list[tuple[float, float, float, float]] = []
     texts: list[dict[str, Any]] = []
     m = MARGIN
@@ -1061,7 +1109,7 @@ def _title_block(width: float, height: float, meta: dict[str, Any], model: Model
               (split_x, y0, split_x, y0 + TITLE_H)]
     mm = model.meta if model else {}
     title = str(meta.get("title") or (model.name if model else meta.get("name") or ""))
-    part = model.name if model else str(meta.get("of") or "")
+    part = model.name if model else str(meta.get("of") or ", ".join(sources or []))
 
     def field_(k: str) -> str:
         return str(meta.get(k) or mm.get(k) or "")
@@ -1091,7 +1139,7 @@ def _traces(views: dict[str, ViewResult], letters: dict[str, str]) -> dict[str, 
         n = _np(s.plane.z_dir)
         o = _np(s.plane.origin)
         for v in views.values():
-            if v is s or v.section is not None or abs(float(n @ v.frame.dir)) > 1e-3:
+            if v is s or v.section is not None or v.dxf or abs(float(n @ v.frame.dir)) > 1e-3:
                 continue
             t = _unit(np.cross(n, v.frame.dir))
             t2 = np.array(v.frame.dir2d(t))
@@ -1138,7 +1186,8 @@ def layout(ev) -> dict[str, Any]:
         sheet, width, height, scale = "A4", *SHEETS["A4"], 1.0
         st.error = st.error or str(exc)
     model = st.model
-    frame_lines, texts = _title_block(width, height, meta, model, scale, sheet)
+    frame_lines, texts = _title_block(width, height, meta, model, scale, sheet,
+                                      [Path(v.dxf).name for v in st.views.values() if v.dxf])
     letters: dict[str, str] = {}
     for v in st.views.values():
         if v.section is not None:
@@ -1152,6 +1201,10 @@ def layout(ev) -> dict[str, Any]:
         if abs(v.scale - scale) > 1e-9:
             label = f"{label + '  ' if label else ''}SCALE {_scale_text(v.scale)}"
         bx = v.sheet_bbox()
+
+        def text_on_sheet(t: dict[str, Any], v=v) -> dict[str, Any]:
+            x, y = v.to_sheet(tuple(t["at"]))
+            return {"at": [_r(x), _r(y)], "text": t["text"], "size": _r(t["size"] * v.scale), "anchor": t["anchor"], "angle": _r(t["angle"])}
         views.append({
             "name": v.name, "direction": v.direction, "at": [_r(v.at[0]), _r(v.at[1])], "scale": v.scale,
             "section": v.section, "offset": v.offset, "flip": v.flip, "hidden_lines": v.hidden_lines,
@@ -1161,6 +1214,10 @@ def layout(ev) -> dict[str, Any]:
             "hidden": [v.seg_to_sheet(s).to_json() for s in v.hidden],
             "hatch": [v.seg_to_sheet(s).to_json() for s in v.hatch],
             "traces": traces.get(v.name, []),
+            "dxf": v.dxf,
+            "annotation": [v.seg_to_sheet(s).to_json() for s in v.annotation],
+            "texts": [text_on_sheet(t) for t in v.texts],
+            "fills": [[_r(c) for p in poly for c in v.to_sheet(p)] for poly in v.fills],
         })
     return {
         "sheet": {"size": sheet, "width": width, "height": height, "scale": scale},
@@ -1198,6 +1255,8 @@ def _texts(scene: dict[str, Any]):
         for tr in v["traces"]:
             for t in tr["texts"]:
                 yield (*t["at"], t["text"], t["size"], t["anchor"], 0, "section")
+        for t in v.get("texts", ()):
+            yield (*t["at"], t["text"], t["size"], t["anchor"], t["angle"], "views")
     for d in scene["dimensions"]:
         if d["label"]:
             yield (*d["label"]["at"], d["label"]["text"], TEXT, d["label"]["anchor"], d["label"]["angle"], "dimensions")
@@ -1224,6 +1283,8 @@ def _segments(scene: dict[str, Any]):
             yield "hidden", s
         for s in v["hatch"]:
             yield "hatch", s
+        for s in v.get("annotation", ()):
+            yield "annotation", s
         for tr in v["traces"]:
             yield "section", {"k": "l", "p": tr["line"]}
             for ln in tr["lines"]:
@@ -1234,6 +1295,13 @@ def _segments(scene: dict[str, Any]):
         if d["arc"]:
             cx, cy, r, a0, a1 = d["arc"]
             yield "dimensions", {"k": "a", "c": [cx, cy], "r": r, "a": [a0, a1]}
+
+
+def _fills(scene: dict[str, Any]):
+    """Filled areas of DXF views: flat [x0, y0, x1, y1, ...] in sheet mm."""
+    for v in scene["views"]:
+        for poly in v.get("fills", ()):
+            yield [(poly[i], poly[i + 1]) for i in range(0, len(poly), 2)]
 
 
 def _arrows(scene: dict[str, Any]):
@@ -1253,6 +1321,7 @@ LAYERS = {
     "hatch": {"width": 0.18, "color": "#404040", "dash": None},
     "section": {"width": 0.5, "color": "#000000", "dash": (6.0, 1.5, 1.5, 1.5)},
     "dimensions": {"width": 0.25, "color": "#000000", "dash": None},
+    "annotation": {"width": 0.25, "color": "#000000", "dash": None},
     "views": {"width": 0.25, "color": "#000000", "dash": None},
     "notes": {"width": 0.25, "color": "#000000", "dash": None},
 }
@@ -1286,6 +1355,9 @@ def to_svg(scene: dict[str, Any]) -> str:
     for layer, a in _arrows(scene):
         tri = " ".join(f"{x:.3f},{y:.3f}" for x, y in _arrow_triangle(a))
         by_layer.setdefault(layer, []).append(f'<polygon points="{tri}" fill="{LAYERS[layer]["color"]}"/>')
+    for poly in _fills(scene):
+        pts = " ".join(f"{x:.3f},{y:.3f}" for x, y in poly)
+        by_layer.setdefault("annotation", []).append(f'<polygon points="{pts}" fill="#000000" stroke="none"/>')
     for layer, els in by_layer.items():
         style = LAYERS[layer]
         dash = f' stroke-dasharray="{" ".join(str(d) for d in style["dash"])}"' if style["dash"] else ""
@@ -1307,7 +1379,7 @@ def to_dxf(scene: dict[str, Any], path: Path) -> None:
 
     doc = ezdxf.new("R2010", setup=True)
     doc.header["$INSUNITS"] = 4
-    colors = {"frame": 7, "visible": 7, "hidden": 8, "hatch": 8, "section": 7, "dimensions": 7, "views": 7, "notes": 7}
+    colors = {"frame": 7, "visible": 7, "hidden": 8, "hatch": 8, "section": 7, "dimensions": 7, "annotation": 7, "views": 7, "notes": 7}
     for layer, style in LAYERS.items():
         lt = "DASHED" if layer == "hidden" else "DASHDOT" if layer == "section" else "CONTINUOUS"
         doc.layers.add(layer, color=colors[layer], linetype=lt, lineweight=int(style["width"] * 100))
@@ -1326,11 +1398,66 @@ def to_dxf(scene: dict[str, Any], path: Path) -> None:
     for layer, a in _arrows(scene):
         tri = _arrow_triangle(a)
         msp.add_solid([tri[0], tri[1], tri[2]], dxfattribs={"layer": layer})
+    for poly in _fills(scene):
+        h = msp.add_hatch(color=7, dxfattribs={"layer": "annotation"})
+        h.paths.add_polyline_path(poly, is_closed=True)
     align = {"start": TextEntityAlignment.LEFT, "middle": TextEntityAlignment.CENTER, "end": TextEntityAlignment.RIGHT}
     for x, y, text, size, anchor, angle, layer in _texts(scene):
         t = msp.add_text(text, dxfattribs={"layer": layer, "height": size, "rotation": angle})
         t.set_placement((x, y), align=align[anchor])
     doc.saveas(path)
+
+
+# TrueType fonts with CJK glyphs, embedded (as a subset) for text Helvetica cannot draw
+UNICODE_FONTS = (
+    ("/System/Library/Fonts/Supplemental/Arial Unicode.ttf", 0), ("/Library/Fonts/Arial Unicode.ttf", 0),
+    ("/System/Library/Fonts/STHeiti Light.ttc", 0),
+    ("/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf", 0), ("/usr/share/fonts/truetype/arphic/uming.ttc", 0),
+    ("/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc", 0), ("/usr/share/fonts/wenquanyi/wqy-zenhei/wqy-zenhei.ttc", 0),
+    ("C:/Windows/Fonts/arialuni.ttf", 0), ("C:/Windows/Fonts/msyh.ttc", 0), ("C:/Windows/Fonts/simsun.ttc", 0),
+)
+_unicode_font: list[str | None] = []
+
+
+def _pdf_font(text: str) -> str:
+    """Helvetica, or for text it has no glyphs for (a DXF's Chinese, Japanese or Korean notes)
+    the first system TrueType font of UNICODE_FONTS, embedded so every viewer shows it. Without
+    one, reportlab's CJK fonts, which a viewer has to supply (and may map wrongly)."""
+    try:
+        text.encode("cp1252")
+        return "Helvetica"
+    except UnicodeEncodeError:
+        pass
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+    from reportlab.pdfbase.ttfonts import TTFont
+
+    if not _unicode_font:
+        found = None
+        for file, index in UNICODE_FONTS:
+            if Path(file).is_file():
+                try:
+                    pdfmetrics.registerFont(TTFont("plainsolid-unicode", file, subfontIndex=index))
+                    found = "plainsolid-unicode"
+                    break
+                except Exception:  # noqa: BLE001, S112 - a font reportlab cannot read: try the next
+                    continue
+        _unicode_font.append(found)
+    if _unicode_font[0]:
+        return _unicode_font[0]
+    if any("\uac00" <= ch <= "\ud7a3" for ch in text):
+        name = "HYSMyeongJo-Medium"
+    elif any("\u3040" <= ch <= "\u30ff" for ch in text):
+        name = "HeiseiMin-W3"
+    else:
+        try:
+            text.encode("big5")
+            name = "MSung-Light"
+        except UnicodeEncodeError:
+            name = "STSong-Light"
+    if name not in pdfmetrics.getRegisteredFontNames():
+        pdfmetrics.registerFont(UnicodeCIDFont(name))
+    return name
 
 
 def to_pdf(scene: dict[str, Any], path: Path) -> None:
@@ -1375,12 +1502,19 @@ def to_pdf(scene: dict[str, Any], path: Path) -> None:
         p.close()
         c.drawPath(p, stroke=0, fill=1)
     c.setFillColor(HexColor("#000000"))
+    for poly in _fills(scene):
+        p = c.beginPath()
+        p.moveTo(poly[0][0] * mm, poly[0][1] * mm)
+        for x, y in poly[1:]:
+            p.lineTo(x * mm, y * mm)
+        p.close()
+        c.drawPath(p, stroke=0, fill=1)
     for x, y, text, size, anchor, angle, _layer in _texts(scene):
         c.saveState()
         c.translate(x * mm, y * mm)
         if angle:
             c.rotate(angle)
-        c.setFont("Helvetica", size * FONT_EM * mm)
+        c.setFont(_pdf_font(text), size * FONT_EM * mm)
         if anchor == "middle":
             c.drawCentredString(0, 0, text)
         elif anchor == "end":

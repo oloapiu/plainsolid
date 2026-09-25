@@ -3,7 +3,8 @@ export type AddConstraint = { statement?: string | null; kind?: string | null; n
 export type AddFeature = { statement?: string | null; kind?: string | null; name?: string | null; args?: { [key: string]: JsonValue }; op: "add_feature"; after?: string | null };
 export type AddParameter = { op: "add_parameter"; name: string; value: JsonValue; description?: string | null };
 export type AddSketchEntity = { statement?: string | null; kind?: string | null; name?: string | null; args?: { [key: string]: JsonValue }; op: "add_sketch_entity"; sketch: string };
-export type Batch = { op: "batch"; ops: Array<SetArgument | SetParameter | AddParameter | DeleteParameter | SetMeta | AddFeature | DeleteFeature | AddSketchEntity | DeleteSketchEntity | AddConstraint | DeleteConstraint | SetConstraintValue | SetConstraintArgument | FilletCorners | Unfillet | Trim | WriteBack | WritePoses | SetEntityArgument | ReplaceSource | SolveSketch | ExplodeImport | MakeEditable | Batch>; sketch?: string | null };
+export type Batch = { op: "batch"; ops: Array<SetArgument | SetParameter | AddParameter | DeleteParameter | SetMeta | AddFeature | DeleteFeature | AddSketchEntity | DeleteSketchEntity | AddConstraint | DeleteConstraint | SetConstraintValue | SetConstraintArgument | FilletCorners | Unfillet | Trim | ConvertDxf | WriteBack | WritePoses | SetEntityArgument | ReplaceSource | SolveSketch | ExplodeImport | MakeEditable | Batch>; sketch?: string | null };
+export type ConvertDxf = { op: "convert_dxf"; sketch: string; entity: string };
 export type DeleteConstraint = { op: "delete_constraint"; sketch: string; constraint: string };
 export type DeleteFeature = { op: "delete_feature"; feature: string; cascade?: boolean };
 export type DeleteParameter = { op: "delete_parameter"; name: string };
@@ -26,4 +27,4 @@ export type Unfillet = { op: "unfillet"; sketch: string; entity: string };
 export type WriteBack = { op: "write_back"; sketch: string; coords: { [key: string]: { [key: string]: JsonValue } }; precision?: number };
 export type WritePoses = { op: "write_poses"; poses: { [key: string]: Pose }; precision?: number };
 
-export type EditOp = SetArgument | SetParameter | AddParameter | DeleteParameter | SetMeta | AddFeature | DeleteFeature | AddSketchEntity | DeleteSketchEntity | AddConstraint | DeleteConstraint | SetConstraintValue | SetConstraintArgument | FilletCorners | Unfillet | Trim | WriteBack | WritePoses | SetEntityArgument | ReplaceSource | SolveSketch | ExplodeImport | MakeEditable | Batch;
+export type EditOp = SetArgument | SetParameter | AddParameter | DeleteParameter | SetMeta | AddFeature | DeleteFeature | AddSketchEntity | DeleteSketchEntity | AddConstraint | DeleteConstraint | SetConstraintValue | SetConstraintArgument | FilletCorners | Unfillet | Trim | ConvertDxf | WriteBack | WritePoses | SetEntityArgument | ReplaceSource | SolveSketch | ExplodeImport | MakeEditable | Batch;

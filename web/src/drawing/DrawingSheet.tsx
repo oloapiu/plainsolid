@@ -1,5 +1,6 @@
 // The sheet of a drawing document: an SVG of the scene the server laid out (views with
-// their hidden lines and hatching, dimensions, notes, the frame and title block), with
+// their hidden lines and hatching, DXF views with their own text, dimensions and fills,
+// dimensions, notes, the frame and title block), with
 // pan and zoom, selection, drag-to-move for views, dimensions and notes (their `at` is
 // written back), and the dimension tool, which picks the edges the server labelled with
 // selectors and places the dimension with a click.
@@ -176,6 +177,8 @@ export function DrawingSheet() {
                 {v.hatch.map((s, i) => <path key={`h${i}`} className="dwg-hatch" d={segPath(s)} />)}
                 {v.hidden.map((s, i) => <path key={`d${i}`} className="dwg-hidden" d={segPath(s)} />)}
                 {v.visible.map((s, i) => <path key={`v${i}`} className="dwg-visible" d={segPath(s)} />)}
+                {(v.annotation ?? []).map((s, i) => <path key={`n${i}`} className="dwg-annotation" d={segPath(s)} />)}
+                {(v.fills ?? []).map((p, i) => <polygon key={`f${i}`} className="dwg-fill" points={p.reduce((acc, c, j) => acc + (j % 2 ? `,${c}` : `${j ? ' ' : ''}${c}`), '')} />)}
                 {v.traces.map((t, i) => (
                   <g key={`t${i}`} className="dwg-section">
                     <line x1={t.line[0]} y1={t.line[1]} x2={t.line[2]} y2={t.line[3]} />
@@ -214,6 +217,7 @@ export function DrawingSheet() {
             <g key={`vt${v.name}`} transform={`translate(${dx} ${-dy})`}>
               {v.label && v.label_at && <Text t={{ at: v.label_at, text: v.label, size: 3.5, anchor: 'middle' }} H={H} cls="dwg-text dwg-label" />}
               {v.traces.flatMap((tr) => tr.texts).map((t, i) => <Text key={i} t={t} H={H} cls="dwg-text" />)}
+              {(v.texts ?? []).map((t, i) => <Text key={`x${i}`} t={t} H={H} cls="dwg-text" />)}
             </g>
           );
         })}

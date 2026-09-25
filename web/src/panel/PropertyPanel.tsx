@@ -4,7 +4,7 @@ import {
   expressionNames, setSketchHighlight, deleteConstraint, setConstraintValue, unknownNames, setError, deleteFeature, openFeatureDialog, setSuppressed,
   fixInstance, fetchAssemblyQueries, fmt, makeEditable, openDocument, isDrawing, exportDocument, modelDocPath, setMeta,
   setOverlay, isViewer, setDeleteConfirm, fetchSummary, toggleSketchSelect, hoverRefs,
-  addConstraint, startDimension, toggleConstructionSelection, setSketchTool, deleteSketchSelection, convertBodySelection, toggleBodySelect, askCorner, unfillet,
+  addConstraint, startDimension, toggleConstructionSelection, setSketchTool, deleteSketchSelection, convertBodySelection, toggleBodySelect, askCorner, unfillet, convertDxf,
 } from '../state/store';
 import { ParamPanel } from '../params/ParamPanel';
 import { PlaneDialog } from './PlaneDialog';
@@ -318,6 +318,20 @@ function ViewProps({ f, tree }: { f: Feature; tree: Tree }) {
   const section = f.args.section != null ? String(f.args.section) : null;
   const at = (f.args.at as number[] | undefined) ?? [0, 0];
   const sheetScale = tree.evaluation.drawing?.sheet.scale ?? 1;
+  if (f.args.dxf) {
+    return (
+      <div className="fields" data-testid="view-props">
+        <RefLine label="dxf" text={f.arg_texts.dxf ?? String(f.args.dxf)} />
+        {f.args.layer != null && <RefLine label="layer" text={f.arg_texts.layer ?? String(f.args.layer)} />}
+        <SheetPoint label="at (mm)" value={at} disabled={ro} onCommit={(p) => setArg('at', { expr: `(${p[0]}, ${p[1]})` })} testId="view-at" />
+        <label className="field"><span>scale</span>
+          <TextField text={f.args.scale != null ? String(f.args.scale) : ''} placeholder={`sheet's (${sheetScale})`} disabled={ro} onCommit={(t) => setArg('scale', t ? { expr: t } : null)} testId="view-scale" />
+        </label>
+        {v && <div className="panel-help">{fmt(v.bbox[2] - v.bbox[0])} × {fmt(v.bbox[3] - v.bbox[1])} mm on the sheet · the DXF as it is, its text and dimensions included</div>}
+        <div className="panel-help">drag the view on the sheet to move it; notes can label it, dimensions measure model views only</div>
+      </div>
+    );
+  }
   return (
     <div className="fields" data-testid="view-props">
       {section ? (
@@ -437,7 +451,9 @@ function DrawingPanel({ tree }: { tree: Tree }) {
     <div className="props" data-testid="drawing-props">
       <div className="props-title"><span>drawing <b>{name}</b></span></div>
       <div className="fields">
-        <div className="measure-row"><span>model</span><span className="mono">{String(tree.meta.of ?? '—')}{scene?.model.kind ? ` · ${scene.model.kind}` : ''}</span></div>
+        {tree.meta.of || !scene?.views.some((v) => v.dxf)
+          ? <div className="measure-row"><span>model</span><span className="mono">{String(tree.meta.of ?? '—')}{scene?.model.kind ? ` · ${scene.model.kind}` : ''}</span></div>
+          : <div className="measure-row"><span>shows</span><span className="mono">{scene.views.filter((v) => v.dxf).map((v) => v.dxf).join(', ')} · DXF</span></div>}
         {scene?.model.error && <div className="props-error">{scene.model.error}</div>}
         <label className="field inline"><span>sheet</span>
           <select value={String(tree.meta.sheet ?? 'A4')} onChange={(e) => setMeta('sheet', e.target.value)} data-testid="meta-sheet">
@@ -449,7 +465,7 @@ function DrawingPanel({ tree }: { tree: Tree }) {
         </label>
         <div className="section-title">title block</div>
         <MetaFields meta={tree.meta} fields={[['title', modelMeta.name ?? 'the model\'s name'], ['revision', 'A'], ['author', ''], ['date', '2026-09-05']]} placeholders={{ revision: modelMeta.revision ?? '', author: modelMeta.author ?? '' }} />
-        <div className="panel-help">the part name and material always come from the model{modelMeta.material ? ` (${modelMeta.material})` : ''}</div>
+        <div className="panel-help">{tree.meta.of ? `the part name and material always come from the model${modelMeta.material ? ` (${modelMeta.material})` : ''}` : 'the title block\'s PART names the DXF files the sheet shows'}</div>
         <div className="btn-row">
           <button className="btn" onClick={() => doExport('pdf')} data-testid="export-pdf">export PDF</button>
           <button className="btn" onClick={() => doExport('dxf')} data-testid="export-dxf">export DXF</button>
@@ -785,6 +801,7 @@ function SketchSelected({ f }: { f: Feature }) {
   const corners = sel.length ? cornersOf(model, sel) : null;
   const cornerAt = (): [number, number] => { const c = corners![0]; const p = 'entity' in c ? handleAt(model, `${c.entity}.${c.corner}`) : handleAt(model, c.a); return p ?? [0, 0]; };
   const cut = sel.length === 1 ? removableCut(model, sel[0]) : null;
+  const dxfs = [...new Set(sel.map(entityOf))].filter((n) => model.entities.get(n)?.kind === 'import_dxf');
   const B = (props: { id: string; label: string; title?: string; on: () => void; active?: boolean; danger?: boolean }) => (
     <button className={`btn-small ${props.active ? 'active' : ''} ${props.danger ? 'danger' : ''}`} data-testid={props.id} title={props.title} onClick={props.on}>{props.label}</button>
   );
@@ -798,12 +815,13 @@ function SketchSelected({ f }: { f: Feature }) {
             {choices.map((c) => <B key={c.kind} id={`constrain-${c.kind}`} label={c.label} on={() => void addConstraint(c.kind, c.refs, c.options)} />)}
             {plan && <B id="constrain-dimension" label={plan.kind} title="the dimension tool with this selection: click to place it (d)" on={startDimension} />}
             {!choices.length && !plan && <span className="panel-help">no relation fits this selection</span>}
-            {(ents.length > 0 || curves.length > 0 || corners || cut) && <span className="sel-sep" />}
+            {(ents.length > 0 || curves.length > 0 || corners || cut || dxfs.length > 0) && <span className="sel-sep" />}
             {ents.length > 0 && <B id="constrain-construction" label="construction" active={allConstruction} title={allConstruction ? 'make profile geometry' : 'make construction geometry'} on={() => void toggleConstructionSelection()} />}
             {curves.length > 0 && <B id="sketch-offset" label="offset…" title="offset the selected curves: click the side, then type the distance" on={() => setSketchTool('offset')} />}
             {corners && <B id="sketch-fillet" label="fillet…" title="round the corner: type the radius" on={() => askCorner('fillet', corners, cornerAt())} />}
             {corners && <B id="sketch-chamfer" label="chamfer…" title="bevel the corner: type the setback" on={() => askCorner('chamfer', corners, cornerAt())} />}
             {cut && <B id="sketch-unfillet" label={`remove the ${cut.what}`} on={() => void unfillet(cut.entity)} />}
+            {dxfs.length === 1 && <B id="sketch-convert-dxf" label="convert to lines" title="turn the DXF import into lines, arcs and circles of this sketch, where it stands" on={() => void convertDxf(dxfs[0])} />}
             {deletable && <><span className="sel-sep" /><B id="sketch-delete" label="delete" danger title="delete the selected entities (del)" on={() => void deleteSketchSelection()} /></>}
           </div>
         </>
@@ -846,8 +864,8 @@ function ConstraintRow({ c, ro, inSketch, sol }: { c: Constraint; ro: boolean; i
   );
 }
 
-const NUMERIC: Record<string, string[]> = { circle: ['diameter'], rect: ['width', 'height'], slot: ['length', 'width', 'angle'], offset: ['distance'] };
-const POINTS: Record<string, string[]> = { point: ['at'], line: ['start', 'end'], arc: ['center', 'start', 'end'], circle: ['at'], rect: ['at'], slot: ['at'] };
+const NUMERIC: Record<string, string[]> = { circle: ['diameter'], rect: ['width', 'height'], slot: ['length', 'width', 'angle'], offset: ['distance'], import_dxf: ['angle'] };
+const POINTS: Record<string, string[]> = { point: ['at'], line: ['start', 'end'], arc: ['center', 'start', 'end'], circle: ['at'], rect: ['at'], slot: ['at'], import_dxf: ['at'] };
 
 const fmtPt = (p: unknown) => (Array.isArray(p) ? `${p[0]}, ${p[1]}` : '');
 const cornerText = (v: unknown) => (typeof v === 'number' ? String(v) : v && typeof v === 'object' ? Object.entries(v as Record<string, number>).map(([k, r]) => `${k} ${r}`).join(' ') : '');
@@ -865,6 +883,7 @@ function entitySummary(e: Entity): string {
     case 'polygon': return `${(a.points as number[][]).length} points${a.corners ? ` · R ${cornerText(a.corners)}` : ''}${a.chamfers ? ` · chamfer ${cornerText(a.chamfers)}` : ''}`;
     case 'project': return e.arg_texts?.selector ?? 'converted';
     case 'offset': return `of ${(a.of as string[]).join(', ')} · ${a.distance} ${a.side ?? 'outside'}`;
+    case 'import_dxf': return `${String(a.path)}${a.layer ? ` · layer ${([] as unknown[]).concat(a.layer).join(', ')}` : ''}`;
     default: return '';
   }
 }
@@ -890,7 +909,7 @@ function EntityRow({ sketch, e, ro, inSketch }: { sketch: string; e: Entity; ro:
   return (
     <div ref={ref} className={`ent-row clickable ${selected ? 'selected' : ''} ${open ? 'open' : ''}`} data-testid={`entity-${e.name}`} onClick={onClick}
          onMouseEnter={() => inSketch && setSketchHighlight([e.name])} onMouseLeave={() => inSketch && setSketchHighlight([])}>
-      <span className="ent-kind">{e.kind}{e.construction ? ' (c)' : e.construction_sides?.length ? ` (c: ${e.construction_sides.join(', ')})` : ''}</span>
+      <span className="ent-kind">{e.kind === 'import_dxf' ? 'dxf' : e.kind}{e.construction ? ' (c)' : e.construction_sides?.length ? ` (c: ${e.construction_sides.join(', ')})` : ''}</span>
       <span className="ent-name">{e.name}</span>
       {!open && <span className="ent-summary">{entitySummary(e)}</span>}
       {open && <span />}
@@ -904,6 +923,13 @@ function EntityRow({ sketch, e, ro, inSketch }: { sketch: string; e: Entity; ro:
             <span className="panel-help">{e.args.corners ? `corners ${cornerText(e.args.corners)}` : ''}{e.args.corners && e.args.chamfers ? ' · ' : ''}{e.args.chamfers ? `chamfers ${cornerText(e.args.chamfers)}` : ''}</span>
           ) : null}
           {e.kind === 'project' && <span className="mono refs">{e.arg_texts?.selector ?? 'converted'}</span>}
+          {e.kind === 'import_dxf' && (
+            <>
+              <span className="mono refs">{String(e.args.path)}{e.args.layer ? ` · layer ${([] as unknown[]).concat(e.args.layer).join(', ')}` : ' · every visible layer'}</span>
+              <span className="panel-help">at is where the file's origin lands, angle turns it about there; drag it in the sketch, or fix it</span>
+              {!ro && <button className="btn-small" onClick={() => void convertDxf(e.name, sketch)} data-testid={`convert-dxf-${e.name}`} title="turn the import into lines, arcs and circles of this sketch, where it stands">convert to lines</button>}
+            </>
+          )}
           {e.kind === 'offset' && (
             <>
               <span className="mono refs">of {(e.args.of as string[]).join(', ')}</span>

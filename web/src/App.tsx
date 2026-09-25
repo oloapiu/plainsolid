@@ -134,7 +134,7 @@ export function App() {
   }, [tool, pickRequest, tree, sketchMode, help, featureDialog, planeDialog, drawingTool, selected, selectedFace, selectedEdge, selectedItem, deleteConfirm, docs, docId]);
 
   const drawing = isDrawing(tree);
-  // a STEP file dropped anywhere on the window is offered to the import dialog, which copies it in
+  // a STEP or DXF file dropped anywhere on the window is offered to the import dialog, which copies it in
   const onDragOver = (e: React.DragEvent) => { if (Array.from(e.dataTransfer.types).includes('Files')) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; } };
   const onDrop = (e: React.DragEvent) => {
     const dropped = Array.from(e.dataTransfer.files);
@@ -144,10 +144,10 @@ export function App() {
     for (const f of dropped) {
       const dot = f.name.lastIndexOf('.');
       const suffix = dot > 0 ? f.name.slice(dot) : '';
-      if (/^\.(step|stp)$/i.test(suffix)) items.push({ name: f.name.slice(0, dot), suffix, file: f });
+      if (/^\.(step|stp|dxf)$/i.test(suffix)) items.push({ name: f.name.slice(0, dot), suffix, file: f });
       else rejected.push(f.name);
     }
-    if (rejected.length) setError(`only STEP files are imported, not ${rejected.join(', ')}`);
+    if (rejected.length) setError(`only STEP and DXF files are imported, not ${rejected.join(', ')}`);
     requestImport(items);
   };
   const exportStep = () => {

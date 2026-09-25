@@ -723,6 +723,7 @@ export class Scene3D {
   private cameraMoved() { this.onCameraChange(this.getCamera()); }
 
   fit() {
+    if (this.sketchFrame && this.sketchBox && !this.mesh?.header.face_ranges.length) { this.fitSketch(); return; }  // no body: the sketch
     const center = this.bboxCenter();
     const dir = this.camera.position.clone().sub(this.target).normalize();
     if (dir.lengthSq() === 0) dir.set(1, -1.2, 0.9).normalize();
@@ -764,6 +765,28 @@ export class Scene3D {
     this.cameraMoved();
   }
 
+  /** Sketch mode: the sketch's own extents in plane coordinates (u0, v0, u1, v1), which fit uses
+   * when there is no body to fit to. */
+  sketchBox: [number, number, number, number] | null = null;
+
+  /** Sketch mode: look square on at the sketch's extents, filling the view with them. */
+  fitSketch() {
+    const frame = this.sketchFrame, box = this.sketchBox;
+    if (!frame || !box) return;
+    const [u0, v0, u1, v1] = box;
+    const size = Math.max(Math.hypot(u1 - u0, v1 - v0), 1);
+    const center = frame.origin.clone().add(frame.x.clone().multiplyScalar((u0 + u1) / 2)).add(frame.y.clone().multiplyScalar((v0 + v1) / 2));
+    const dist = (size * 0.6) / Math.tan((this.camera.fov * Math.PI) / 360) + size * 0.1;
+    this.size = Math.max(this.size, size);
+    this.target.copy(center);
+    this.camera.up.copy(frame.y);
+    this.camera.position.copy(center).add(frame.n.clone().multiplyScalar(dist));
+    this.updateNearFar();
+    this.camera.lookAt(this.target);
+    this.requestRender();
+    this.cameraMoved();
+  }
+
   /** Sketch mode: back to looking straight at the sketch plane, keeping the zoom. */
   normalTo() {
     if (this.sketchFrame) this.lookAtPlane(this.sketchFrame, true);
@@ -771,6 +794,7 @@ export class Scene3D {
 
   setSketchFrame(frame: PlaneFrame | null) {
     this.sketchFrame = frame;
+    if (!frame) this.sketchBox = null;
     if (frame) this.lookAtPlane(frame);
     else this.camera.up.set(0, 0, 1);
     // the axis triad is noise behind a square-on sketch

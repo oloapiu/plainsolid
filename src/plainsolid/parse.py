@@ -29,7 +29,7 @@ FEATURE_KINDS = {
 } | ASSEMBLY_KINDS | DRAWING_KINDS
 BODY_KINDS = {"extrude", "cut", "revolve", "fillet", "chamfer", "shell", "linear_pattern", "circular_pattern", "mirror", "import_step"}
 TOOL_KINDS = {"extrude", "cut", "revolve", "linear_pattern", "circular_pattern", "mirror"}  # repeatable by a pattern or mirror
-ENTITY_KINDS = {"point", "line", "circle", "arc", "rect", "slot", "polygon", "project", "offset"}
+ENTITY_KINDS = {"point", "line", "circle", "arc", "rect", "slot", "polygon", "project", "offset", "import_dxf"}
 CONSTRAINT_KINDS = {
     "coincident", "horizontal", "vertical", "parallel", "perpendicular", "equal", "tangent",
     "concentric", "coradial", "colinear", "symmetric", "midpoint", "on", "fix",
@@ -70,6 +70,7 @@ POSITIONAL = {
     "polygon": ("name", "points"),
     "project": ("name", "selector"),
     "offset": ("name", "of", "distance"),
+    "import_dxf": ("name", "path"),
     "coincident": ("name", "a", "b"),
     "horizontal": ("name", "a", "b"),
     "vertical": ("name", "a", "b"),

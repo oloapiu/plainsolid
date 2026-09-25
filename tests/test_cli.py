@@ -228,7 +228,7 @@ def test_open_status_and_stop_talk_to_the_running_server(live_server, tmp_path_f
 
 def test_launcher_files(monkeypatch, tmp_path):
     """The Finder Quick Action and the desktop entry call the running executable by its full
-    path and only touch STEP files."""
+    path and only touch STEP and DXF files."""
     import plistlib
 
     from plainsolid import cli
@@ -239,12 +239,12 @@ def test_launcher_files(monkeypatch, tmp_path):
     for plist in (workflow, info):
         assert plistlib.loads(plistlib.dumps(plist)) == plist
     script = workflow["actions"][0]["action"]["ActionParameters"]["COMMAND_STRING"]
-    assert "*.step|*.stp|*.STEP|*.STP) '/Applications/My Tools/plainsolid' open \"$f\"" in script
+    assert "*.step|*.stp|*.STEP|*.STP|*.dxf|*.DXF) '/Applications/My Tools/plainsolid' open \"$f\"" in script
     assert workflow["workflowMetaData"]["serviceApplicationBundleID"] == "com.apple.finder"
     assert info["NSServices"][0]["NSMenuItem"]["default"] == "Open in plainsolid"
     desktop, mime = cli.desktop_entry(["/opt/plainsolid/.venv/bin/plainsolid"])
     assert "Exec=/opt/plainsolid/.venv/bin/plainsolid open %F" in desktop and "MimeType=model/step;" in desktop
-    assert '<glob pattern="*.stp"/>' in mime
+    assert '<glob pattern="*.stp"/>' in mime and '<glob pattern="*.dxf"/>' in mime and "image/vnd.dxf;" in desktop
     exe = tmp_path / "plainsolid"
     exe.write_text("#!/bin/sh\n")
     exe.chmod(0o755)

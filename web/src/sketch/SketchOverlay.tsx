@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { sceneRef } from '../viewport/Viewport';
 import { frameFromInfo, type PlaneFrame } from '../viewport/scene';
 import {
-  useStore, edit, hoverEntity, exitSketch, featureByName, nextName, setSketchTool, setStatus, setError, sketchBatch, sketchNames, toggleSketchSelect, setSketchHover, startDrag, previewDrag, endDrag, cancelDragPreview, addConstraint, startDimension, setDimLock, setSketchSelection, askCorner, cancelCornerAsk, filletCorners, unfillet, trimAt, expressionNames, expressionValue, toggleConstructionMode, toggleConstructionSelection, type SketchTool, useBodyInRelation, selectorTarget, toggleBodySelect, convertBodySelection,
+  useStore, edit, hoverEntity, exitSketch, featureByName, nextName, setSketchTool, setStatus, setError, sketchBatch, sketchNames, toggleSketchSelect, setSketchHover, startDrag, previewDrag, endDrag, cancelDragPreview, addConstraint, startDimension, setDimLock, setSketchSelection, askCorner, cancelCornerAsk, filletCorners, unfillet, convertDxf, trimAt, expressionNames, expressionValue, toggleConstructionMode, toggleConstructionSelection, type SketchTool, useBodyInRelation, selectorTarget, toggleBodySelect, convertBodySelection,
   openContextMenu, openFeatureDialog, deleteSketchSelection, getState, type MenuEntry,
 } from '../state/store';
 import { item, SEP } from '../menu/entries';
@@ -60,6 +60,11 @@ export function SketchOverlay() {
 
   const model = useMemo(() => (feature ? buildModel(feature, sm.preview) : null), [feature, sm.preview]);
   modelRef.current = model;
+  // the sketch's extents, which fit uses when there is no body to fit to (a DXF's sketch)
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (scene && model) scene.sketchBox = sketchExtents(model);
+  }, [model]);
   const picksKey = sm.selection.join(',');  // the tool effect follows the picks themselves, not just their count
   // every dimension's lines and text position: the label from the file (or the default), overridden while it is dragged
   const dims = useMemo(() => {
@@ -83,6 +88,8 @@ export function SketchOverlay() {
     const frame = frameFromInfo(sm.frame);
     frameRef.current = frame;
     scene.setSketchFrame(frame);
+    // a part without a body gives the camera nothing to frame: the sketch's own extents instead
+    if (scene.sketchBox && !getState().tree?.evaluation.has_body) scene.fitSketch();
     scene.setGhost(true);
     const grid = planeGrid(frame, scene.modelSize());
     scene.overlay.add(grid);
@@ -430,6 +437,8 @@ export function SketchOverlay() {
         }
         const cut = sel.length === 1 ? removableCut(m, sel[0]) : null;
         if (cut) edits.push(item(`remove the ${cut.what}`, () => void unfillet(cut.entity)));
+        const dxfs = [...new Set(sel.map(entityOf))].filter((n) => m.entities.get(n)?.kind === 'import_dxf');
+        if (dxfs.length === 1) edits.push(item('convert to lines', () => void convertDxf(dxfs[0]), { title: 'turn the DXF import into lines, arcs and circles of this sketch, where it stands' }));
         const curves = sel.filter((r) => refKind(m, r) !== 'point' && !r.endsWith('.axis') && !isBuiltin(r));
         if (curves.length) edits.push(item('offset…', () => setSketchTool('offset'), { title: 'click the side to offset to, then type the distance' }));
         const flippable = sel.filter((r) => { const i = m.entities.get(entityOf(r)); return !!i && !i.projected && !i.builtin && i.kind !== 'point'; });
@@ -705,4 +714,15 @@ function distToSegmentLocal(p: Pt, a: Pt, b: Pt): number {
   const l2 = dx * dx + dy * dy;
   const t = l2 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2)) : 0;
   return Math.hypot(p[0] - (a[0] + t * dx), p[1] - (a[1] + t * dy));
+}
+
+/** The sketch's own geometry's extents in plane coordinates (the built-in origin and axes left out). */
+function sketchExtents(m: SketchModel): [number, number, number, number] | null {
+  let u0 = Infinity, v0 = Infinity, u1 = -Infinity, v1 = -Infinity;
+  const add = (u: number, v: number) => { u0 = Math.min(u0, u); v0 = Math.min(v0, v); u1 = Math.max(u1, u); v1 = Math.max(v1, v); };
+  for (const c of m.curves) {
+    if (m.entities.get(c.entity)?.builtin) continue;
+    if (c.kind === 'line') { add(c.a[0], c.a[1]); add(c.b[0], c.b[1]); } else { add(c.c[0] - c.r, c.c[1] - c.r); add(c.c[0] + c.r, c.c[1] + c.r); }
+  }
+  return u0 <= u1 ? [u0, v0, u1, v1] : null;
 }

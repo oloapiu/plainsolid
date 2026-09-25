@@ -74,7 +74,7 @@ export function buildModel(f: Feature, override?: Record<string, Record<string, 
     const a = solvedArgs(e, sol, override);
     const n = e.name;
     const cs = new Set(e.construction_sides ?? []);
-    entities.set(n, { name: n, kind: e.kind, construction: e.construction, projected: e.kind === 'project' || e.kind === 'offset', constructionSides: cs });
+    entities.set(n, { name: n, kind: e.kind, construction: e.construction, projected: e.kind === 'project' || e.kind === 'offset' || e.kind === 'import_dxf', constructionSides: cs });
     switch (e.kind) {
       case 'point': H(n, n, pt(a.at), 'point'); break;
       case 'line': {
@@ -126,9 +126,11 @@ export function buildModel(f: Feature, override?: Record<string, Record<string, 
         break;
       }
       case 'project':
-      case 'offset': {
+      case 'offset':
+      case 'import_dxf': {
         const items = sol?.projected?.[n]?.items ?? [];
         items.forEach((it, i) => addProjected(handles, curves, n, items.length === 1 ? n : `${n}.e${i}`, it));
+        if (e.kind === 'import_dxf') H(`${n}.origin`, n, pt(a.at), 'point');  // where the file's origin landed
         break;
       }
       default: break;
@@ -506,6 +508,11 @@ export function hitTest(m: SketchModel, p: Pt, tol: number, mids = false): { ref
 /** The point to drag when the user grabs a reference. Null when it cannot be dragged. */
 export function dragTarget(m: SketchModel, ref: string): string | null {
   const info = m.entities.get(entityOf(ref));
+  if (info?.kind === 'import_dxf') {  // a DXF moves as one piece: grab it by any of its points
+    if (m.handles.some((h) => h.ref === ref)) return ref;
+    const c = curveOf(m, ref);
+    return c ? `${ref}.${c.kind === 'line' ? 'mid' : 'center'}` : null;
+  }
   if (!info || info.projected) return null;
   if (m.handles.some((h) => h.ref === ref)) return ref;
   const c = curveOf(m, ref);

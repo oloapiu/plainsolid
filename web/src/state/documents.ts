@@ -2,10 +2,10 @@ import { ApiError, api } from '../api/client';
 import { set, state, withBusy } from './core';
 import { cancelMeshFetch, fetchGhost, fetchMesh, statusFor } from './geometry';
 import { RequestLane, documentEpoch, invalidateDocumentRequests } from './requests';
-import { syncSketchFrame } from './sketch';
+import { enterSketch, syncSketchFrame } from './sketch';
 import { cancelDocumentTools, dragState, setStatus } from './tools';
 import { loadViews } from './views';
-import type { EditOp, EditResult, ImportItem } from '../api/types';
+import { isDxf, type DxfMode, type EditOp, type EditResult, type ImportItem } from '../api/types';
 import type { State } from './core';
 
 let unsubscribeEvents: (() => void) | null = null;
@@ -58,7 +58,7 @@ async function openFromQuery() {
   }));
 }
 
-/** Queue STEP files for the import dialog; the first one shows. */
+/** Queue STEP and DXF files for the import dialog; the first one shows. */
 export function requestImport(items: ImportItem[]) {
   if (items.length) set({ imports: [...state.imports, ...items] });
 }
@@ -67,20 +67,24 @@ export function skipImport() {
   set({ imports: state.imports.slice(1) });
 }
 
-/** Copy the first queued file into the project as folder/name.suffix and open the copy. On
- * failure the file stays queued, so the dialog can take another name. */
-export async function importNext(folder: string, name: string): Promise<boolean> {
+/** Copy the first queued file into the project as folder/name.suffix and open the copy, a DXF
+ * file in the mode chosen; a DXF already in the project only opens in that mode. On failure the
+ * file stays queued, so the dialog can take another name. */
+export async function importNext(folder: string, name: string, mode?: DxfMode): Promise<boolean> {
   const item = state.imports[0];
   if (!item) return false;
   set({ loading: true, error: null });
   try {
-    const tree = item.source !== undefined
-      ? await api.importFile(item.source, folder, name)
-      : await api.uploadFile(item.file as Blob, folder, name, item.suffix);
+    const tree = item.path !== undefined
+      ? await api.openDocument(item.path, mode)
+      : item.source !== undefined
+        ? await api.importFile(item.source, folder, name, mode)
+        : await api.uploadFile(item.file as Blob, folder, name, item.suffix, mode);
     set({ imports: state.imports.filter((i) => i !== item) });
     const docs = await api.listDocuments();
     set({ docs });
-    if (await useDocument(tree.id)) set({ status: `imported ${folder ? `${folder}/` : ''}${name}${item.suffix}` });
+    const what = item.path !== undefined ? `opened ${item.path} as a ${mode}` : `imported ${folder ? `${folder}/` : ''}${name}${item.suffix}`;
+    if (await useDocument(tree.id)) { set({ status: what }); showNewDxfSketch(tree); }
     else set({ loading: false });
     void refreshFiles();
     return true;
@@ -100,13 +104,29 @@ export async function quitServer() {
   }
 }
 
-export async function openDocument(path: string) {
+/** A part just written for a DXF holds only the sketch of its curves, which a part without a body
+ * would not show: open it for editing, where the curves, the warnings and extrude or cut are. */
+function showNewDxfSketch(opened: { created?: boolean; kind: string }) {
+  if (!opened.created || opened.kind !== 'part') return;
+  const sketch = state.tree?.features.find((f) => f.kind === 'sketch' && f.entities.some((e) => e.kind === 'import_dxf'));
+  if (sketch) enterSketch(sketch);
+}
+
+/** Open a project file; a DXF file first asks, in the import dialog, whether it opens as a part
+ * or as a drawing. */
+export async function openDocument(path: string, mode?: DxfMode) {
+  if (isDxf(path) && !mode) {
+    const base = path.split('/').pop() ?? path;
+    requestImport([{ name: base.slice(0, base.length - 4), suffix: base.slice(-4), path }]);
+    return;
+  }
   set({ loading: true, error: null });
   try {
-    const tree = await api.openDocument(path);
+    const tree = await api.openDocument(path, mode);
     const docs = await api.listDocuments();
     set({ docs });
     if (!await useDocument(tree.id)) set({ loading: false });
+    else showNewDxfSketch(tree);
   } catch (e) {
     set({ error: (e as Error).message, loading: false });
   }

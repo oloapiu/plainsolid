@@ -39,6 +39,7 @@ _render_lock = threading.Lock()
 
 class OpenRequest(BaseModel):
     path: str
+    mode: str | None = None  # a DXF file: "part" or "drawing"
 
 
 class LocalFileRequest(BaseModel):
@@ -46,9 +47,10 @@ class LocalFileRequest(BaseModel):
 
 
 class ImportRequest(BaseModel):
-    source: str  # an absolute path to a STEP file, copied into the project
+    source: str  # an absolute path to a STEP or DXF file, copied into the project
     folder: str = ""
     name: str | None = None
+    mode: str | None = None  # a DXF file: "part" or "drawing"
 
 
 class NewRequest(BaseModel):
@@ -250,7 +252,7 @@ def create_app(root: str | Path | None = None, serve_client: bool = True) -> Fas
 
     @app.get("/api/files")
     def list_files() -> dict[str, Any]:
-        """Model files and STEP files under the project, for choosers."""
+        """Model files, STEP files and DXF files under the project, for choosers."""
         return {"root": str(ws.root), "files": ws.files()}
 
     @app.post("/api/documents/{doc_id}/close")
@@ -263,12 +265,21 @@ def create_app(root: str | Path | None = None, serve_client: bool = True) -> Fas
     @app.post("/api/documents/open")
     async def open_document(req: OpenRequest) -> dict[str, Any]:
         try:
-            doc = ws.open(req.path)
+            doc = ws.open(req.path, req.mode)
         except FileNotFoundError:
             raise HTTPException(404, f"no such file: {req.path}") from None
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from None
-        return await run(doc.tree_json)
+        return await _opened(doc)
+
+    async def _opened(doc: OpenDocument) -> dict[str, Any]:
+        """The tree of a document just opened; `created` when this open wrote its file (a DXF's
+        wrapper), which the client takes as the cue to show what is in it."""
+        tree = await run(doc.tree_json)
+        if doc.created:
+            doc.created = False
+            tree = {**tree, "created": True}
+        return tree
 
     def _imported(fn) -> OpenDocument:
         try:
@@ -282,18 +293,19 @@ def create_app(root: str | Path | None = None, serve_client: bool = True) -> Fas
 
     @app.post("/api/documents/import")
     async def import_document(req: ImportRequest) -> dict[str, Any]:
-        """Copy a STEP file from elsewhere on this machine into the project and open it."""
+        """Copy a STEP or DXF file from elsewhere on this machine into the project and open it."""
         src = Path(req.source).expanduser()
         doc = await asyncio.to_thread(_imported, functools.partial(
-            ws.import_file, req.folder, req.name or src.stem, src.suffix, source=src))
-        return await run(doc.tree_json)
+            ws.import_file, req.folder, req.name or src.stem, src.suffix, source=src, mode=req.mode))
+        return await _opened(doc)
 
     @app.put("/api/documents/upload")
-    async def upload_document(request: Request, folder: str = "", name: str = "", suffix: str = "") -> dict[str, Any]:
-        """The same from the browser: the bytes of a dropped STEP file."""
+    async def upload_document(request: Request, folder: str = "", name: str = "", suffix: str = "",
+                              mode: str | None = None) -> dict[str, Any]:
+        """The same from the browser: the bytes of a dropped STEP or DXF file."""
         data = await request.body()
-        doc = await asyncio.to_thread(_imported, functools.partial(ws.import_file, folder, name, suffix, data=data))
-        return await run(doc.tree_json)
+        doc = await asyncio.to_thread(_imported, functools.partial(ws.import_file, folder, name, suffix, data=data, mode=mode))
+        return await _opened(doc)
 
     @app.post("/api/open-request")
     async def open_request(req: LocalFileRequest) -> dict[str, Any]:

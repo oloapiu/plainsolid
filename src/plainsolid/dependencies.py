@@ -24,6 +24,8 @@ def references(doc: Document) -> list[Path]:
     if cached is None:
         base = Path(doc.path).parent if doc.path else Path.cwd()
         paths = [f.args.get("path") for f in doc.features if f.kind in ("import_step", "instance")]
+        paths += [e.args.get("path") for f in doc.features for e in f.entities if e.kind == "import_dxf"]
+        paths += [f.args.get("dxf") for f in doc.features if f.kind == "view"]
         if doc.kind == "drawing":
             paths.append(doc.meta.get("of"))
         seen: dict[Path, None] = {}

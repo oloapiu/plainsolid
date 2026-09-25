@@ -1,7 +1,10 @@
 export interface DocSummary { id: string; path: string; hash: string; name: string; kind?: string }
 
 /** A model file or STEP file under the project, for choosers. */
-export interface ProjectFile { path: string; kind: 'part' | 'assembly' | 'drawing' | 'step'; wrapper?: string }
+export interface ProjectFile { path: string; kind: 'part' | 'assembly' | 'drawing' | 'step' | 'dxf'; wrapper?: string; part?: string; drawing?: string }
+/** How a DXF file opens: a plate cut from its outline, or a drawing sheet that shows it. */
+export type DxfMode = 'part' | 'drawing';
+export const isDxf = (path: string): boolean => /\.dxf$/i.test(path);
 
 export interface DocError { message: string; line: number | null; kind: string }
 
@@ -68,6 +71,8 @@ export interface AssemblySolution {
 export interface Tree {
   id: string; hash: string; revision: string; kind: string; meta: Record<string, unknown>; params: Param[];
   features: Feature[]; errors: DocError[]; path: string | null;
+  /** on an open or import: this open wrote the document's file (a DXF's wrapper) */
+  created?: boolean;
   names?: { params: string[]; dimensions: string[] };
   evaluation: { has_body: boolean; seconds: number; kind?: string; instances?: Instance[]; cached?: number; assembly?: AssemblySolution | null; drawing?: DrawingScene | null };
 }
@@ -107,8 +112,9 @@ export type WorkspaceEvent =
   | { event: 'open-request'; action: 'open'; path: string }
   | { event: 'open-request'; action: 'import'; source: string; name: string; suffix: string };
 
-/** A STEP file waiting for the import dialog: dropped on the window (file) or named by a launcher (source). */
-export interface ImportItem { name: string; suffix: string; source?: string; file?: Blob }
+/** A STEP or DXF file waiting for the import dialog: dropped on the window (file) or named by a launcher
+ * (source); or a DXF file already in the project (path), which only needs its mode chosen. */
+export interface ImportItem { name: string; suffix: string; source?: string; file?: Blob; path?: string }
 
 // ---- sections, measurements, views ---------------------------------------------
 
@@ -155,6 +161,8 @@ export interface DwgView {
   name: string; direction: string; at: [number, number]; scale: number; section: string | null; offset: number; flip: boolean;
   hidden_lines: boolean; bbox: [number, number, number, number]; label: string | null; label_at: [number, number] | null;
   visible: DwgSeg[]; hidden: DwgSeg[]; hatch: DwgSeg[]; traces: DwgTrace[];
+  /** a DXF view: the file, its dimension and leader lines, its text and its filled areas (flat x, y lists) */
+  dxf?: string | null; annotation?: DwgSeg[]; texts?: DwgText[]; fills?: number[][];
 }
 export interface DwgDimension {
   name: string; view: string; kind: string; value: number; text: string; lines: number[][]; arrows: number[][]; arc: number[] | null;

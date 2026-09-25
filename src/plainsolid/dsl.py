@@ -324,6 +324,28 @@ class SketchHandle(FeatureHandle):
             raise TypeError(f"project {name!r}: expected a selector such as body.edges.nearest((x, y, z)), got {selector!r}")
         return self._add("project", name, {"selector": selector.selector.to_json()}, construction)
 
+    def import_dxf(self, name: str, path: str, *, layer: Any = None, at=(0.0, 0.0), angle: float = 0.0,
+                   construction: bool = False) -> SketchHandle:
+        """The lines, arcs and circles of a DXF file (relative to this file), in millimetres,
+        as one rigid piece: `at` is where the file's origin lands, `angle` turns it about
+        there. `layer` reads one layer or a list of them (default: every visible layer).
+        Its curves are references like a projection's (`outline.e3`, `outline.e3.start`)
+        plus `outline.origin`; profile geometry unless construction."""
+        what = f"import_dxf {name!r}"
+        if not isinstance(path, str) or not path.strip():
+            raise TypeError(f"{what}: path must be the DXF file, relative to this file")
+        if not path.lower().endswith(".dxf"):
+            raise ValueError(f"{what}: {path!r} is not a .dxf file")
+        args: dict[str, Any] = {"path": path, "at": _pt(at), "angle": float(angle)}
+        if layer is not None:
+            if isinstance(layer, str):
+                args["layer"] = layer
+            elif isinstance(layer, (list, tuple)) and layer and all(isinstance(x, str) for x in layer):
+                args["layer"] = list(layer)
+            else:
+                raise TypeError(f"{what}: layer takes a layer name or a list of names, got {layer!r}")
+        return self._add("import_dxf", name, args, construction)
+
     # --- constraints --------------------------------------------------------
 
     def _constrain(self, kind: str, name: str, refs: list[Any], value: float | None = None,
@@ -906,16 +928,33 @@ def _sheet_xy(value: Any, what: str) -> list[float]:
 
 
 def view(name: str, direction: Any = FRONT, *, at=(0.0, 0.0), scale: float | None = None, hidden: bool | None = None,
-         section: Any = None, offset: float = 0.0, flip: bool = False, suppressed: bool = False) -> ViewHandle:
+         section: Any = None, offset: float = 0.0, flip: bool = False, dxf: str | None = None, layer: Any = None,
+         suppressed: bool = False) -> ViewHandle:
     """A view of the drawing's model, its centre at `at` on the sheet (mm from the
     bottom-left corner). `scale` defaults to the sheet's. `hidden` draws hidden lines
     dashed (on by default, off for sections). `section=YZ` (a standard plane) or
     `section="mid"` (a plane feature of the model), with `offset`, cuts the model and
-    looks at the cut face from the side that was removed; `flip` keeps the other side."""
+    looks at the cut face from the side that was removed; `flip` keeps the other side.
+    `dxf="old.dxf"` shows a DXF file as it is instead (its extents centred on `at`,
+    `layer` one layer or a list of them); such a view needs no model and takes notes
+    but no dimensions."""
     b = _builder()
     what = f"view {name!r}"
     args: dict[str, Any] = {"at": _sheet_xy(at, what)}
-    if section is not None:
+    if dxf is not None:
+        if not isinstance(dxf, str) or not dxf.lower().endswith(".dxf"):
+            raise TypeError(f"{what}: dxf= takes a .dxf file relative to the drawing, got {dxf!r}")
+        if section is not None:
+            raise ValueError(f"{what}: a DXF view cannot also be a section")
+        args["dxf"] = dxf
+        if layer is not None:
+            if isinstance(layer, str) or (isinstance(layer, (list, tuple)) and layer and all(isinstance(x, str) for x in layer)):
+                args["layer"] = layer if isinstance(layer, str) else list(layer)
+            else:
+                raise TypeError(f"{what}: layer takes a layer name or a list of names, got {layer!r}")
+    elif layer is not None:
+        raise ValueError(f"{what}: layer= goes with dxf=")
+    elif section is not None:
         if isinstance(section, PlaneRef):
             args["section"] = section.ref_name
         elif isinstance(section, str) and section:

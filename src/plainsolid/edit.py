@@ -23,7 +23,7 @@ FEATURE_KINDS = {
     "sketch", "extrude", "cut", "import_step", "plane", "revolve", "fillet", "chamfer", "shell",
     "linear_pattern", "circular_pattern", "mirror", "instance",
 } | MATE_KINDS | DRAWING_KINDS
-ENTITY_KINDS = {"point", "line", "circle", "arc", "rect", "slot", "polygon", "project", "offset"}
+ENTITY_KINDS = {"point", "line", "circle", "arc", "rect", "slot", "polygon", "project", "offset", "import_dxf"}
 CONSTRAINT_KINDS = {
     "coincident", "horizontal", "vertical", "parallel", "perpendicular", "equal", "tangent",
     "concentric", "coradial", "colinear", "symmetric", "midpoint", "on", "fix",
@@ -116,6 +116,8 @@ KIND_DEFAULTS = {
     ("revolve", "angle"): ("360", "360.0"), ("circular_pattern", "angle"): ("360", "360.0"),
     ("project", "construction"): ("True",),  # converted geometry is construction unless the file says otherwise
     ("offset", "side"): ('"outside"', "'outside'"), ("offset", "corners"): ('"sharp"', "'sharp'"),
+    ("import_dxf", "at"): ("(0, 0)", "(0.0, 0.0)"), ("import_dxf", "angle"): ("0", "0.0"), ("import_dxf", "layer"): ("None",),
+    ("view", "dxf"): ("None",), ("view", "layer"): ("None",),
     ("instance", "at"): ("(0, 0, 0)", "(0.0, 0.0, 0.0)"), ("instance", "rotate"): ("(0, 0, 0)", "(0.0, 0.0, 0.0)"),
     ("view", "hidden"): ("None",), ("view", "scale"): ("None",), ("view", "section"): ("None",),
     ("dimension", "kind"): ("None",), ("dimension", "along"): ("None",), ("dimension", "text"): ("None",),
@@ -678,10 +680,32 @@ def write_back(src: str, sketch_name: str, coords: dict[str, dict[str, Any]], pr
             if new is not None:
                 args[j] = a.with_changes(value=new)
                 changed = True
+        if kind == "import_dxf":
+            # a DXF import is placed by keywords its statement may leave out while they are defaults
+            have = {a.keyword.value for a in args if a.keyword is not None}
+            for key in ("at", "angle"):
+                value = solved.get(key)
+                if key in have or value is None:
+                    continue
+                text = _tuple_text(value, precision) if key == "at" else _num_text(float(value), precision)
+                if is_default(kind, key, text):
+                    continue
+                args = _with_keyword(args, key, text)
+                changed = True
         if changed:
             body[i] = _replace_call(module.body[i], call.with_changes(args=args))
             changed_any = True
     return module.with_changes(body=body).code if changed_any else src
+
+
+def _with_keyword(args: list[cst.Arg], key: str, text: str) -> list[cst.Arg]:
+    """The call's arguments with `key=text` appended, the comma styled like the rest."""
+    out = list(args)
+    if out and out[-1].comma is cst.MaybeSentinel.DEFAULT:
+        out[-1] = out[-1].with_changes(comma=cst.Comma(whitespace_after=cst.SimpleWhitespace(" ")))
+    out.append(cst.Arg(keyword=cst.Name(key), value=cst.parse_expression(text),
+                       equal=cst.AssignEqual(whitespace_before=cst.SimpleWhitespace(""), whitespace_after=cst.SimpleWhitespace(""))))
+    return out
 
 
 def _rewrite_corners(node: cst.BaseExpression, value: Any, precision: int) -> cst.BaseExpression | None:

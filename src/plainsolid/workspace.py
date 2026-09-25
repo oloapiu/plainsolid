@@ -20,6 +20,7 @@ import numpy as np
 
 from . import assembly as pasm
 from . import dependencies
+from . import dxfimport as pdxf
 from . import edit as edit_ops
 from . import section as psection
 from .evaluate import Evaluation, Item, evaluate
@@ -30,6 +31,8 @@ from .parse import parse_document
 from .stepimport import ImportError_, import_step_tree, relocated, select_node, split_fragment
 
 STEP_SUFFIXES = (".step", ".stp")
+DXF_SUFFIXES = (".dxf",)
+DXF_MODES = ("part", "drawing")  # a plate cut from the DXF's outline, or a drawing sheet showing the DXF
 CACHE_DIR = ".plainsolid-cache"
 SKIP_DIRS = {".git", ".venv", "node_modules", "__pycache__", CACHE_DIR, ".pytest_cache", ".ruff_cache", "dist", "build"}
 
@@ -159,6 +162,7 @@ class OpenDocument:
     _meshes: dict[str, dict] = field(default_factory=dict)
     _cache: Evaluation | None = None  # the last full evaluation; unchanged feature prefixes are reused
     _revision: str = ""
+    created: bool = False  # its file was written by this open (a DXF's wrapper), until the caller reports it
 
     @property
     def revision(self) -> str:
@@ -275,20 +279,33 @@ class Workspace:
             raise ValueError(f"{p} is outside the project {self.root}: copy it into the project first")
         return p
 
-    def open(self, path: str | Path) -> OpenDocument:
+    def open(self, path: str | Path, mode: str | None = None) -> OpenDocument:
         """A model file, a STEP file (through its wrapper), or `x.step#node`: one
-        sub-assembly of the file as a document of its own. Inside the project only."""
+        sub-assembly of the file as a document of its own. A DXF file opens as a part
+        cut from its outline or as a drawing showing it, as `mode` says. Inside the
+        project only."""
         text, node = split_fragment(str(path))
         p = self._inside(text)
         if p.suffix.lower() in STEP_SUFFIXES:
             if not p.exists():
                 raise FileNotFoundError(p)
             p = self._wrapper(p, node)
+        elif p.suffix.lower() in DXF_SUFFIXES:
+            if not p.exists():
+                raise FileNotFoundError(p)
+            p, created = self._dxf_wrapper(p, mode)
+            if created:
+                doc = self.path_for(p) or self._load(p)
+                doc.created = True
+                return doc
         elif node:
             raise ValueError(f"only a STEP file takes a #node, not {p.name}")
         for d in self.docs.values():
             if d.path == p:
                 return d
+        return self._load(p)
+
+    def _load(self, p: Path) -> OpenDocument:
         source = p.read_text(encoding="utf-8")
         doc = OpenDocument(path=p, source=source, document=parse_document(source, str(p)),
                            cache_dir=self.root / CACHE_DIR)
@@ -314,6 +331,22 @@ class Workspace:
             wrapper.write_text(wrapper_source(step.name, step_kind(step, node), node), encoding="utf-8")
         return wrapper
 
+    def _dxf_wrapper(self, dxf: Path, mode: str | None) -> tuple[Path, bool]:
+        """The model file that opens a DXF, written on the first open in that mode:
+        `x.py` (a part holding a sketch of the DXF) or `x_dwg.py` (a drawing) next to
+        `x.dxf`; and whether this call wrote it."""
+        if mode not in DXF_MODES:
+            raise ValueError(f"a DXF file opens as a part or as a drawing: say which (mode {' or '.join(DXF_MODES)})")
+        wrapper = dxf.with_suffix(".py") if mode == "part" else dxf.with_name(f"{dxf.stem}_dwg.py")
+        if not wrapper.exists():
+            if mode == "part":
+                source = pdxf.part_source(dxf.name, dxf.stem)
+            else:
+                source = pdxf.drawing_source(dxf, dxf.name, dxf.stem)
+            wrapper.write_text(source, encoding="utf-8")
+            return wrapper, True
+        return wrapper, False
+
     def locate(self, path: str | Path) -> dict[str, Any]:
         """How a local file would open here: `{"action": "open", "path": rel}` for a file
         inside the project, `{"action": "import", "source": abs, "name": stem, "suffix": ...}`
@@ -323,17 +356,19 @@ class Workspace:
             raise FileNotFoundError(p)
         if p.is_relative_to(self.root):
             return {"action": "open", "path": p.relative_to(self.root).as_posix()}
-        if p.suffix.lower() in STEP_SUFFIXES:
+        if p.suffix.lower() in (*STEP_SUFFIXES, *DXF_SUFFIXES):
             return {"action": "import", "source": str(p), "name": p.stem, "suffix": p.suffix}
-        raise ValueError(f"{p} is outside the project, and only STEP files are imported")
+        raise ValueError(f"{p} is outside the project, and only STEP and DXF files are imported")
 
     def import_file(self, folder: str, name: str, suffix: str, *, source: str | Path | None = None,
-                    data: bytes | None = None) -> OpenDocument:
-        """Copy a STEP file into the project, from a local path or from bytes, as
-        `folder/name.suffix`, then open it. The original is never touched. Refuses to
-        overwrite, and anything but STEP."""
-        if suffix.lower() not in STEP_SUFFIXES:
-            raise ValueError(f"only STEP files are imported, not {suffix or 'a file without a suffix'}")
+                    data: bytes | None = None, mode: str | None = None) -> OpenDocument:
+        """Copy a STEP or DXF file into the project, from a local path or from bytes, as
+        `folder/name.suffix`, then open it (a DXF as `mode` says). The original is never
+        touched. Refuses to overwrite, and anything but STEP and DXF."""
+        if suffix.lower() not in (*STEP_SUFFIXES, *DXF_SUFFIXES):
+            raise ValueError(f"only STEP and DXF files are imported, not {suffix or 'a file without a suffix'}")
+        if suffix.lower() in DXF_SUFFIXES and mode not in DXF_MODES:
+            raise ValueError(f"a DXF file opens as a part or as a drawing: say which (mode {' or '.join(DXF_MODES)})")
         stem = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in name.strip()).strip("._")
         if not stem:
             raise ValueError("the name is empty")
@@ -351,7 +386,7 @@ class Workspace:
         else:
             tmp.write_bytes(data or b"")
         os.replace(tmp, target)
-        return self.open(target)
+        return self.open(target, mode)
 
     def create(self, path: str | Path, kind: str = "part", name: str | None = None,
                material: str = "al6061", of: str | None = None) -> OpenDocument:
@@ -372,7 +407,14 @@ class Workspace:
                 except ValueError:
                     pass
             of = rel.as_posix()
-        p.write_text(template_source(stem, kind, material, of=of), encoding="utf-8")
+        if kind == "drawing" and of and of.lower().endswith(DXF_SUFFIXES):
+            dxf = (p.parent / of).resolve()
+            if not dxf.is_file():
+                raise ValueError(f"no such DXF file: {of}")
+            source = pdxf.drawing_source(dxf, of, dxf.stem, stem)  # a sheet showing the DXF, no model
+        else:
+            source = template_source(stem, kind, material, of=of)
+        p.write_text(source, encoding="utf-8")
         return self.open(p)
 
     def get(self, doc_id: str) -> OpenDocument:
@@ -385,7 +427,7 @@ class Workspace:
         self.docs.pop(doc_id, None)
 
     def files(self) -> list[dict[str, str]]:
-        """Model files and STEP files under the project, relative to its root."""
+        """Model files, STEP files and DXF files under the project, relative to its root."""
         out: list[dict[str, str]] = []
         for dirpath, dirnames, filenames in os.walk(self.root):
             dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS and not d.startswith("."))
@@ -398,6 +440,12 @@ class Workspace:
                     entry: dict[str, str] = {"path": rel, "kind": "step"}
                     if wrapper.exists():
                         entry["wrapper"] = wrapper.relative_to(self.root).as_posix()  # opening the STEP opens this
+                    out.append(entry)
+                elif suffix in DXF_SUFFIXES:
+                    entry = {"path": rel, "kind": "dxf"}
+                    for mode, wrapper in (("part", p.with_suffix(".py")), ("drawing", p.with_name(f"{p.stem}_dwg.py"))):
+                        if wrapper.exists():
+                            entry[mode] = wrapper.relative_to(self.root).as_posix()  # what opening it in that mode opens
                     out.append(entry)
                 elif suffix == ".py":
                     try:
@@ -488,7 +536,7 @@ class Workspace:
     SKETCH_OPS: ClassVar[frozenset[str]] = frozenset({
         "add_sketch_entity", "delete_sketch_entity", "set_entity_argument", "add_constraint",
         "delete_constraint", "set_constraint_value", "set_constraint_argument", "solve_sketch", "batch",
-        "fillet_corners", "unfillet", "trim",
+        "fillet_corners", "unfillet", "trim", "convert_dxf",
     })
 
     def apply(self, doc: OpenDocument, op: dict[str, Any], base_hash: str | None) -> dict[str, Any]:
@@ -508,7 +556,7 @@ class Workspace:
                 extra["skipped"] = list(self._skipped)
             elif kind == "make_editable":
                 new, extra = self._make_editable(doc, old, op)
-            elif kind in ("fillet_corners", "unfillet", "trim"):
+            elif kind in ("fillet_corners", "unfillet", "trim", "convert_dxf"):
                 new = self._composed_op(doc, old, op)
             else:
                 new = edit_ops.apply(old, op)
@@ -665,8 +713,9 @@ class Workspace:
         return out
 
     def _composed_op(self, doc: OpenDocument, source: str, op: dict[str, Any]) -> str:
-        """A fillet, chamfer, its removal or a trim: composed from the sketch as solved now into
-        the ordinary operations, applied as one batch (the write-back then follows as usual)."""
+        """A fillet, chamfer, its removal, a trim or a DXF conversion: composed from the sketch as
+        solved now into the ordinary operations, applied as one batch (the write-back then follows
+        as usual)."""
         from .evaluate import sketch_context, solve_feature_sketch
         from .filleting import FilletError, fillet_ops, unfillet_ops
         from .trimming import TrimError, trim_ops
@@ -678,7 +727,7 @@ class Workspace:
         coords, projected = None, None
         try:
             body, plane, identity = sketch_context(parsed, feature, cache=doc._cache)
-            solution = solve_feature_sketch(feature, body, None, plane, identity)
+            solution = solve_feature_sketch(feature, body, None, plane, identity, doc.path.parent)
             coords, projected = solution.coords, solution.projected
         except ValueError:
             pass  # the file's coordinates then
@@ -687,9 +736,11 @@ class Workspace:
                 ops = fillet_ops(feature, coords, list(op["corners"]), float(op["size"]), str(op.get("kind", "fillet")))
             elif op["op"] == "unfillet":
                 ops = unfillet_ops(feature, coords, str(op["entity"]))
+            elif op["op"] == "convert_dxf":
+                ops = pdxf.convert_ops(feature, projected, str(op["entity"]))
             else:
                 ops = trim_ops(feature, coords, projected, str(op["entity"]), (float(op["at"][0]), float(op["at"][1])))
-        except (FilletError, TrimError) as exc:
+        except (FilletError, TrimError, pdxf.DxfError) as exc:
             raise edit_ops.EditError(str(exc)) from None
         return edit_ops.apply(source, {"op": "batch", "sketch": feature.name, "ops": ops})
 
@@ -705,7 +756,7 @@ class Workspace:
         try:
             body, plane, identity = sketch_context(parsed, feature, cache=doc._cache)
             targets = {k: (float(v[0]), float(v[1])) for k, v in (drag or {}).items()}
-            solution = solve_feature_sketch(feature, body, targets or None, plane, identity)
+            solution = solve_feature_sketch(feature, body, targets or None, plane, identity, doc.path.parent)
         except ValueError:
             return source, None
         return edit_ops.write_back(source, sketch_name, solution.coords), solution
@@ -822,7 +873,7 @@ class Workspace:
                 raise KeyError(f"no sketch named {sketch_name!r}")
             body, plane, identity = sketch_context(doc.document, feature, cache=doc._cache)
             targets = {k: (float(v[0]), float(v[1])) for k, v in (drag or {}).items()}
-            return solve_feature_sketch(feature, body, targets or None, plane, identity)
+            return solve_feature_sketch(feature, body, targets or None, plane, identity, doc.path.parent)
 
     def set_source(self, doc: OpenDocument, source: str, base_hash: str | None) -> dict[str, Any]:
         return self.apply(doc, {"op": "replace_source", "source": source}, base_hash)

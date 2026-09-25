@@ -58,6 +58,7 @@ from OCP.TopoDS import TopoDS_Compound
 
 from . import assembly as pasm
 from . import drawing as pdrawing
+from . import dxfimport as pdxf
 from .model import Document, DocumentError, Feature
 from .offset import compute_offsets, references_offsets
 from .parse import DRAWING_KINDS, MATE_KINDS, TOOL_KINDS
@@ -159,6 +160,19 @@ class SketchGeom:
     profile: list[tuple[Edge, str]]
     coords: dict[str, dict[str, Any]]
     projected: dict[str, Projected]
+    _boxes: Any = field(default=None, repr=False, compare=False)  # the profile edges' 2D boxes, made on first use
+
+    def profile_boxes(self):
+        """(n, 4) array of min x, min y, max x, max y per profile edge, for pruning nearest-edge searches."""
+        if self._boxes is None:
+            import numpy as np
+
+            rows = []
+            for edge, _label in self.profile:
+                b = edge.bounding_box()
+                rows.append((b.min.X, b.min.Y, b.max.X, b.max.Y))
+            self._boxes = np.array(rows, dtype=float).reshape(-1, 4)
+        return self._boxes
 
 
 @dataclass
@@ -335,6 +349,11 @@ def _signature(prev: str, feature: Feature, doc: Document) -> str:
     if feature.kind in ("import_step", "instance"):
         path = _resolve_path(doc, split_fragment(feature.args.get("path", ""))[0])
         payload["file"] = file_dependencies([path])
+    dxf = [e.args["path"] for e in feature.entities if e.kind == "import_dxf"]
+    if feature.kind == "view" and feature.args.get("dxf"):
+        dxf.append(feature.args["dxf"])
+    if dxf:
+        payload["dxf"] = file_dependencies([_resolve_path(doc, str(p)) for p in dxf])
     return hashlib.sha1((prev + json.dumps(payload, sort_keys=True, default=str)).encode()).hexdigest()
 
 
@@ -406,7 +425,12 @@ def evaluate(doc: Document, upto: str | None = None, cache: Evaluation | None = 
 
 
 def _load_drawing_model(ev: Evaluation) -> None:
-    """The part or assembly a drawing shows; a failure is reported by every view."""
+    """The part or assembly a drawing shows; a failure is reported by every view. A drawing
+    of DXF files alone names none."""
+    if not pdrawing.has_model(ev.document):
+        if any(f.kind == "view" and not f.args.get("dxf") for f in ev.document.features):
+            ev.drawing.error = 'a view of a model needs the model: meta(kind="drawing", of="part.py")'
+        return
     try:
         model = pdrawing.load_model(pdrawing.model_path(ev.document))
     except pdrawing.DrawingError as exc:
@@ -416,12 +440,15 @@ def _load_drawing_model(ev: Evaluation) -> None:
     ev.dependencies.update(model.dependencies)
 
 
+def _doc_dir(doc: Document) -> Path:
+    return Path(doc.path).parent if doc.path else Path.cwd()
+
+
 def _resolve_path(doc: Document, rel: str) -> Path:
     p = Path(rel)
     if p.is_absolute():
         return p
-    base = Path(doc.path).parent if doc.path else Path.cwd()
-    return (base / p).resolve()
+    return (_doc_dir(doc) / p).resolve()
 
 
 def _evaluate_one(feature: Feature, ev: Evaluation, r: FeatureResult) -> None:
@@ -499,8 +526,13 @@ def _evaluate_one(feature: Feature, ev: Evaluation, r: FeatureResult) -> None:
 def _evaluate_sketch(feature: Feature, ev: Evaluation, r: FeatureResult) -> None:
     plane = sketch_plane(feature, ev)
     r.plane = plane_json(plane, ev.body)
-    solution = solve_feature_sketch(feature, ev.body, plane=plane, identity=ev.identity())
+    base = _doc_dir(ev.document)
+    solution = solve_feature_sketch(feature, ev.body, plane=plane, identity=ev.identity(), base=base)
     r.sketch = solution
+    if any(e.kind == "import_dxf" for e in feature.entities):
+        for name, warns in pdxf.resolve(feature, base)[1].items():
+            r.warnings.extend(f"{name}: {w}" for w in warns)
+            ev.dependencies.add(str(_resolve_path(ev.document, str(feature.entity(name).args["path"]))))
     if solution.conflicting:
         r.warnings.append("conflicting constraints: " + ", ".join(solution.conflicting))
     if solution.redundant:
@@ -610,19 +642,30 @@ def _evaluate_mate(feature: Feature, ev: Evaluation, r: FeatureResult) -> None:
 
 def _evaluate_drawing(feature: Feature, ev: Evaluation, r: FeatureResult) -> None:
     st = ev.drawing
-    if st.model is None:
-        raise ValueError(f"the model could not be loaded: {st.error}")
     try:
+        if feature.kind == "view" and feature.args.get("dxf"):
+            v = pdrawing.build_dxf_view(_resolve_path(ev.document, str(feature.args["dxf"])), feature.name, feature.args,
+                                        pdrawing.sheet_scale(ev.document.meta))
+            st.views[feature.name] = v
+            r.faces_created = len(v.visible)
+            r.warnings.extend(v.warnings)
+            return
+        if feature.kind == "note":
+            view = feature.args.get("view")
+            if view is not None and str(view) not in st.views and st.model is None and pdrawing.has_model(ev.document):
+                raise ValueError(f"the model could not be loaded: {st.error}")  # its view could not be drawn
+            st.notes.append(pdrawing.build_note(feature.name, feature.args, st.views))
+            return
+        if st.model is None and (feature.kind == "view" or pdrawing.has_model(ev.document)):
+            raise ValueError(f"the model could not be loaded: {st.error}")
         if feature.kind == "view":
             v = pdrawing.build_view(st.model, feature.name, feature.args, pdrawing.sheet_scale(ev.document.meta))
             pdrawing.attach_refs(v, st.model)
             st.views[feature.name] = v
             r.faces_created = len(v.visible)
             r.warnings.extend(v.warnings)
-        elif feature.kind == "dimension":
-            st.dimensions.append(pdrawing.build_dimension(st.model, feature.name, feature.args, st.views))
         else:
-            st.notes.append(pdrawing.build_note(feature.name, feature.args, st.views))
+            st.dimensions.append(pdrawing.build_dimension(st.model, feature.name, feature.args, st.views))
     except pdrawing.DrawingError as exc:
         raise ValueError(str(exc)) from None
 
@@ -797,9 +840,12 @@ def sketch_context(doc: Document, feature: Feature, cache: Evaluation | None = N
 
 
 def resolve_projections(feature: Feature, body: Part | None, plane: Plane,
-                        identity: Identity | None = None) -> dict[str, Projected]:
-    """Projected entities of a sketch, in the sketch's 2D frame."""
+                        identity: Identity | None = None, base: Path | None = None) -> dict[str, Projected]:
+    """Projected entities of a sketch, in the sketch's 2D frame, and its DXF imports read
+    from files next to the document (`base`), placed where the file's statement puts them."""
     out: dict[str, Projected] = {}
+    if any(e.kind == "import_dxf" for e in feature.entities):
+        out.update(pdxf.resolve(feature, base or Path.cwd())[0])
     for e in feature.entities:
         if e.kind != "project":
             continue
@@ -817,11 +863,12 @@ def resolve_projections(feature: Feature, body: Part | None, plane: Plane,
 
 def solve_feature_sketch(feature: Feature, body: Part | None,
                          drag: dict[str, tuple[float, float]] | None = None,
-                         plane: Plane | None = None, identity: Identity | None = None) -> SketchSolution:
+                         plane: Plane | None = None, identity: Identity | None = None,
+                         base: Path | None = None) -> SketchSolution:
     if plane is None:
         on = feature.args["on"]
         plane = finish_plane(STANDARD_PLANES[on], feature) if isinstance(on, str) and on in STANDARD_PLANES else Plane.XY
-    projected = resolve_projections(feature, body, plane, identity)
+    projected = resolve_projections(feature, body, plane, identity, base)
     try:
         return _solve_with_offsets(feature, projected, drag)
     except (SolverError, SketchError) as exc:
@@ -844,7 +891,7 @@ def _solve_with_offsets(feature: Feature, projected: dict[str, Projected], drag)
         if settled or not references_offsets(feature):
             break
         solution = solve_sketch(feature, {**projected, **derived}, drag)
-    solution.projected = {**projected, **derived}
+    solution.projected = {**solution.projected, **derived}  # DXF imports where the solution placed them
     return solution
 
 
@@ -1012,7 +1059,12 @@ def _merge_body(feature: Feature, ev: Evaluation, r: FeatureResult, tools: list[
     if len(solids) == 0:
         raise ValueError("the result is empty")
     if len(solids) > 1:
-        raise ValueError(f"the result is {len(solids)} separate solids; a part is one solid body")
+        sketch = ev.document.feature(str(feature.args.get("sketch") or ""))
+        hint = ""
+        if sketch is not None and any(e.kind == "import_dxf" for e in sketch.entities):
+            hint = ("; the DXF holds several separate outlines: if it is a drawing (a frame, notes, views), "
+                    "open the .dxf as a drawing instead, or import one layer with layer=")
+        raise ValueError(f"the result is {len(solids)} separate solids; a part is one solid body{hint}")
     body = _as_part(body)
 
     created = 0
@@ -1061,8 +1113,25 @@ def _nearest_profile_label(sg: SketchGeom, point: Vector) -> tuple[str, ...]:
         return ()
     local = sg.plane.to_local_coords(point)
     q = Vector(local.X, local.Y, 0)
-    best = min(sg.profile, key=lambda pe: pe[0].distance_to(q))
-    return (best[1],)
+    if len(sg.profile) <= 32:
+        best = min(sg.profile, key=lambda pe: pe[0].distance_to(q))
+        return (best[1],)
+    # many edges (a DXF outline): exact distances only for edges whose box could hold the nearest,
+    # in order of that lower bound; the first edge in profile order wins a tie, as min() would
+    import numpy as np
+
+    b = sg.profile_boxes()
+    dx = np.maximum(np.maximum(b[:, 0] - local.X, local.X - b[:, 2]), 0.0)
+    dy = np.maximum(np.maximum(b[:, 1] - local.Y, local.Y - b[:, 3]), 0.0)
+    bound = np.hypot(dx, dy)
+    best_i, best_d = -1, math.inf
+    for i in np.argsort(bound, kind="stable"):
+        if bound[i] > best_d + 1e-9:
+            break
+        d = sg.profile[i][0].distance_to(q)
+        if d < best_d - 1e-12 or (abs(d - best_d) <= 1e-12 and i < best_i):
+            best_i, best_d = int(i), d
+    return (sg.profile[best_i][1],)
 
 
 def _label_extrusion(tool: Part, sg: SketchGeom, direction: Vector) -> list[tuple[str, ...]]:

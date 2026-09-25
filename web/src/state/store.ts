@@ -64,6 +64,7 @@ export {
   toggleSketchSelect,
   trimAt,
   unfillet,
+  convertDxf,
   unknownNames,
   useBodyInRelation,
 } from './sketch';

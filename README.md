@@ -41,7 +41,8 @@ uv run plainsolid serve    # the app on http://127.0.0.1:8321
 
 Your documents live in `cad/` at the root of the checkout: gitignored, created
 on the first run, and the only place the app reads and writes. Press "new" for
-a part, or copy a STEP file into `cad/` and open it as a viewer. To look at the
+a part, or copy a STEP file into `cad/` and open it as a viewer, or a DXF file
+to open as a sketch or as a drawing sheet. To look at the
 examples instead, `uv run plainsolid serve zoo --open bracket.py`; any other
 folder works the same way with `plainsolid serve DIR`. Keep in mind that `cad/`
 is yours: git ignores it, and `git clean -x` would delete it.
@@ -103,9 +104,12 @@ instead of indices. The GUI writes those on a click whenever they are unique;
 geometric selectors (`nearest`, `where`, `largest`) cover the rest.
 
 Sketches take lines, arcs, circles, rectangles, slots and polygons,
-constraints and dimensions, plus two derived entities: `project` converts
+constraints and dimensions, plus three derived entities: `project` converts
 body edges, vertices or a face outline into geometry that follows the body,
-and `offset` puts curves at a distance from other curves. Part features:
+`offset` puts curves at a distance from other curves, and `import_dxf` reads
+the curves of a DXF file as one rigid piece (placed by relations like any
+other entity, following the file when it changes, and turned into plain
+lines, arcs and circles by "convert to lines"). Part features:
 `extrude` (depth, `upto=` a face, `through=True`, draft, symmetric,
 `op="cut"`), `cut`, `revolve`, `fillet`, `chamfer`, `shell`,
 `linear_pattern`, `circular_pattern`, `mirror`, `plane`, `import_step`; every
@@ -165,7 +169,10 @@ note("finish", "Break all edges 0.5 mm", at=(12, 28))
 ```
 
 A drawing shows a part, an assembly or a STEP file on a sheet (A4, A3 or
-letter, mm from the bottom-left corner). A `view` projects it with hidden
+letter, mm from the bottom-left corner), or a DXF file as it is:
+`view("old", dxf="bracket_rev_b.dxf", at=(148, 117))` draws the file's
+curves, text, dimensions and fills, and a drawing of DXF files alone needs no
+`of=`; notes can label it, dimensions measure model views only. A `view` projects it with hidden
 lines from a standard direction, or cuts it along a plane and hatches the
 cut. Dimensions reference the model through the view they sit in, with the
 same selectors as everywhere else. The title block takes the model's name,
@@ -175,6 +182,20 @@ and export to PDF, DXF or SVG. From the command line: `plainsolid new
 bracket_dwg.py --kind drawing --of bracket.py`, then `plainsolid export
 bracket_dwg.py -o bracket.pdf`.
 
+## Opening a DXF file
+
+A DXF file opens one of two ways, and the dialog asks which every time: as a
+**part**, a sketch of the file's curves (`plate.py` next to `plate.dxf`: a
+sketch on XY holding the import, fixed where the file puts it, and nothing
+else; it opens for editing, and extrude, cut or revolve it from there), or as
+a **drawing**, a sheet showing the
+file as it is (`plate_dwg.py`, on the smallest sheet and the largest standard
+scale that hold it). Units come from the file; ends closer than 5 µm are
+joined, and the gaps that keep an outline from closing are reported with
+where they are. Drop the file on the window, open it from "open ▾", or
+`plainsolid open plate.dxf`; a file from outside the project is copied in
+first, like a STEP file.
+
 ## Reviewing a STEP file from the contract manufacturer
 
 Drop the file on the app's window: one dialog asks for the folder and the
@@ -183,7 +204,7 @@ and opens as a viewer to section, measure, pin and snapshot. From the file
 manager, `uv run plainsolid install-launcher` adds "Open in plainsolid" to the
 Finder's right-click Quick Actions (should that submenu show only
 "Customize…", pick it and tick "Open in plainsolid"), or registers plainsolid
-for STEP files on a Linux desktop; it starts the server when none is running.
+for STEP and DXF files on a Linux desktop; it starts the server when none is running.
 From a terminal:
 
 ```sh

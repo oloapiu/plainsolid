@@ -191,6 +191,14 @@ class Trim(Operation):
     at: list[float] = Field(min_length=2, max_length=2)
 
 
+class ConvertDxf(Operation):
+    """Turn a DXF import into lines, arcs and circles where it stands, joined by coincidents;
+    relations on its curves move to them, relations on the import as a whole go."""
+    op: Literal["convert_dxf"]
+    sketch: str
+    entity: str
+
+
 class WriteBack(Operation):
     op: Literal["write_back"]
     sketch: str
@@ -276,6 +284,7 @@ EditOperation = Annotated[
     | FilletCorners
     | Unfillet
     | Trim
+    | ConvertDxf
     | WriteBack
     | WritePoses
     | SetEntityArgument

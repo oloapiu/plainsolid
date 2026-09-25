@@ -372,6 +372,7 @@ function DrawingTree({ tree, selected }: { tree: Tree; selected: string | null }
   const scene = tree.evaluation.drawing ?? null;
   const title = String(tree.meta.name ?? tree.path?.split('/').pop() ?? 'document');
   const modelPath = String(tree.meta.of ?? '');
+  const dxfs = tree.features.filter((f) => f.kind === 'view' && f.args.dxf).map((f) => String(f.args.dxf));
   const toggle = (t: 'dimension' | 'note') => { setViewMenu(false); setDrawingTool(tool === t ? null : t); };
   const addSection = async () => {
     setViewMenu(false);
@@ -389,12 +390,12 @@ function DrawingTree({ tree, selected }: { tree: Tree; selected: string | null }
         <span className="tree-title" title={tree.path ?? title}>{title}</span>
       </div>
       <div className="tree-actions">
-        <button className={`btn-small ${viewMenu ? 'active' : ''}`} onClick={() => { setDrawingTool(null); setViewMenu(!viewMenu); }} title="add a view of the model" data-testid="new-view">+ view</button>
-        <button className={`btn-small ${tool === 'dimension' ? 'active' : ''}`} onClick={() => toggle('dimension')} title="dimension: pick one or two edges on the sheet, then click where the dimension goes" data-testid="new-dimension">+ dimension</button>
+        <button className={`btn-small ${viewMenu ? 'active' : ''}`} disabled={!modelPath} onClick={() => { setDrawingTool(null); setViewMenu(!viewMenu); }} title={modelPath ? 'add a view of the model' : 'this drawing shows DXF files and has no model to view (meta of=)'} data-testid="new-view">+ view</button>
+        <button className={`btn-small ${tool === 'dimension' ? 'active' : ''}`} disabled={!modelPath} onClick={() => toggle('dimension')} title={modelPath ? 'dimension: pick one or two edges on the sheet, then click where the dimension goes' : 'dimensions measure model views; this drawing shows DXF files'} data-testid="new-dimension">+ dimension</button>
         <button className={`btn-small ${tool === 'note' ? 'active' : ''}`} onClick={() => toggle('note')} title="note: click where the text goes" data-testid="new-note">+ note</button>
       </div>
       <div className="tree-caption" data-testid="drawing-model">
-        of <span className="mono">{modelPath}</span>{scene?.model.kind ? ` · ${scene.model.kind}` : ''}
+        {modelPath || !dxfs.length ? <>of <span className="mono">{modelPath}</span>{scene?.model.kind ? ` · ${scene.model.kind}` : ''}</> : <>shows <span className="mono">{dxfs.join(', ')}</span> · DXF</>}
         {modelDocPath() && <button className="btn-small" onClick={() => { const p = modelDocPath(); if (p) void openDocument(p); }} title="open the model in a tab; the drawing follows its edits" data-testid="open-model">open model</button>}
       </div>
       {viewMenu && (
@@ -409,7 +410,7 @@ function DrawingTree({ tree, selected }: { tree: Tree; selected: string | null }
       {tree.features.map((f, i) => {
         const r = f.result;
         const dim = scene?.dimensions.find((d) => d.name === f.name);
-        const detail = f.kind === 'view' ? (f.args.section ? `section ${String(f.args.section)}` : String(f.args.direction ?? '')) : f.kind === 'dimension' ? (dim ? `${dim.kind} ${dim.text}` : 'dimension') : 'note';
+        const detail = f.kind === 'view' ? (f.args.dxf ? `dxf ${String(f.args.dxf)}` : f.args.section ? `section ${String(f.args.section)}` : String(f.args.direction ?? '')) : f.kind === 'dimension' ? (dim ? `${dim.kind} ${dim.text}` : 'dimension') : 'note';
         const cls = ['tree-row', f.name === selected ? 'selected' : '', r && !r.ok ? 'failed' : '', f.suppressed ? 'suppressed' : ''].join(' ');
         return (
           <div key={f.name} className={cls} onClick={() => select(f.name)} onContextMenu={(e) => rowContext(e, f)} data-testid={`feature-${f.name}`} title={f.span ? `lines ${f.span[0]}–${f.span[1]}` : 'generated'}>

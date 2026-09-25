@@ -116,7 +116,7 @@ def _edges_and_faces(entities: list[Entity], coords, projected: dict[str, Projec
                 if pts[0] != pts[-1]:
                     pts.append(pts[0])
                 faces.extend(Polygon(*pts).faces())
-        elif e.kind in ("project", "offset"):
+        elif e.kind in ("project", "offset", "import_dxf"):
             pr = projected.get(e.name)
             if pr is None:
                 raise SketchError(f"{e.kind} {e.name!r} was not resolved")
@@ -186,11 +186,15 @@ def _at(obj: Sketch, at: tuple[float, float]) -> Sketch:
 def _nest(faces: list[Face]) -> list[Face]:
     """Even-odd nesting by containment of face centres."""
     faces = sorted(faces, key=lambda f: -f.area)
+    boxes = [f.bounding_box() for f in faces]
     depth = [0] * len(faces)
     parent = [-1] * len(faces)
     for i, f in enumerate(faces):
         c = f.center()
         for j in range(i):
+            b = boxes[j]  # the point-in-face test is costly: only faces whose box holds the point
+            if not (b.min.X - 1e-6 <= c.X <= b.max.X + 1e-6 and b.min.Y - 1e-6 <= c.Y <= b.max.Y + 1e-6):
+                continue
             if faces[j].is_inside(c):
                 depth[i] += 1
                 if parent[i] == -1 or depth[j] > depth[parent[i]]:
@@ -200,11 +204,23 @@ def _nest(faces: list[Face]) -> list[Face]:
         if depth[i] % 2:
             continue
         holes = [faces[k] for k in range(len(faces)) if parent[k] == i and depth[k] == depth[i] + 1]
-        shape = f
-        for h in holes:
-            shape = shape - h
-        result.extend(shape.faces())
+        result.extend(_with_holes(f, holes))
     return result
+
+
+def _with_holes(face: Face, holes: list[Face]) -> list[Face]:
+    """The face with the holes inside it: built from the wires at once, which is fast; a
+    boolean cut per hole when that face is not valid (a hole touching the outline)."""
+    if not holes:
+        return [face]
+    with contextlib.suppress(Exception):
+        made = Face(face.outer_wire(), [h.outer_wire() for h in holes])
+        if made.is_valid() and abs(made.area - (face.area - sum(h.area for h in holes))) <= 1e-6 * max(face.area, 1.0):
+            return [made]
+    shape = face
+    for h in holes:
+        shape = shape - h
+    return list(shape.faces())
 
 
 def sketch_faces(feature: Feature, coords=None, projected: dict[str, Projected] | None = None,
@@ -271,7 +287,7 @@ def profile_edges(feature: Feature, coords=None, projected: dict[str, Projected]
                 pts = a["points"]
                 for i, pt in enumerate(pts):
                     out.append((line(pt, pts[(i + 1) % len(pts)]), f"{n}.e{i}"))
-            elif e.kind in ("project", "offset"):
+            elif e.kind in ("project", "offset", "import_dxf"):
                 pr = projected.get(n)
                 if pr is None:
                     continue

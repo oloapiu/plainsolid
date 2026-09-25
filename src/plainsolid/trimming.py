@@ -79,7 +79,7 @@ def sketch_curves(feature: Feature, coords: dict[str, dict[str, Any]] | None, pr
             L(f"{n}.bottom", n, (p[0] - vx * r, p[1] - vy * r), (q[0] - vx * r, q[1] - vy * r))
             out.append(_arc(f"{n}.start_arc", n, p, (p[0] + vx * r, p[1] + vy * r), (p[0] - vx * r, p[1] - vy * r)))
             out.append(_arc(f"{n}.end_arc", n, q, (q[0] - vx * r, q[1] - vy * r), (q[0] + vx * r, q[1] + vy * r)))
-        elif e.kind in ("project", "offset") and projected and n in projected:
+        elif e.kind in ("project", "offset", "import_dxf") and projected and n in projected:
             items = projected[n].items
             for i, it in enumerate(items):
                 ref = n if len(items) == 1 else f"{n}.e{i}"
@@ -278,6 +278,8 @@ def trim_ops(feature: Feature, coords: dict[str, dict[str, Any]] | None, project
         raise TrimError(f"{entity!r} is a {e.kind}: its sides cannot be trimmed; draw the outline with lines to trim it")
     if e.kind in ("project", "offset"):
         raise TrimError(f"{entity!r} follows other geometry and cannot be trimmed")
+    if e.kind == "import_dxf":
+        raise TrimError(f"{entity!r} is a DXF import; convert it to lines first to trim it")
     if e.kind not in ("line", "arc", "circle"):
         raise TrimError(f"{entity!r} is a {e.kind}; trim works on lines, arcs and circles")
     curves = sketch_curves(feature, coords, projected)

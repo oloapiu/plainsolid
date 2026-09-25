@@ -46,7 +46,7 @@ collection on an unmarked test. The L numbers match the test docstrings.
 | L4 references | `refs` | Every selector in the zoo parts under parameter and dimension changes; dangling references | medium |
 | L5 API | `api` | FastAPI test client, a live uvicorn server with a WebSocket and the file watcher, the MCP tools | medium |
 | L6 CLI | `cli` | Commands in-process through typer's runner, plus one real subprocess | medium |
-| L7 IO | `io` | STEP export and import, STL, SVG, DXF and PDF, the vendor generators | medium |
+| L7 IO | `io` | STEP export and import, STL, SVG, DXF and PDF, DXF import, the vendor generators | medium |
 | L8 render | `render` | Offscreen PNGs through VTK; skipped loudly without pyvista | slow |
 | client state | none, `npm test` | The real TypeScript store under `node:vm` with the API and React mocked | fast |
 | L9 browser | none, `web/verify.mjs` | Playwright driving real Chromium against a served bundle | slow |
@@ -149,6 +149,11 @@ files live in `corpus/` (gitignored) and feed only L10 and the bench script.
   reports hierarchy, names, colours and positions, caches by path, mtime and
   size, and enforces one solid per part. STL is binary with a triangle count
   matching the file size. The bracket drawing exports to SVG, DXF and PDF.
+  `test_dxf.py` reads DXF files into sketches (units, bulges, blocks,
+  splines, layers, joined ends and reported gaps), solves and converts the
+  rigid import, rebuilds when the file changes, draws a DXF view on a sheet
+  with no model and exports it, and opens a DXF as a part or a drawing
+  through the API.
 - **L8 render.** The bracket renders from the iso and top views at the
   requested size, the image is not blank, highlighting every face changes
   pixels, an unknown view raises. The module skips when pyvista is missing.

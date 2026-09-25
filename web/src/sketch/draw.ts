@@ -52,8 +52,11 @@ export function points(frame: PlaneFrame, pts: Pt[], color: number, size = 6): T
 }
 
 export function planeGrid(frame: PlaneFrame, size: number): THREE.GridHelper {
-  const s = Math.ceil((size * 2.4) / 10) * 10;
-  const grid = new THREE.GridHelper(s, s / 10, 0x6f7a86, 0x4a525b);
+  // 10 mm cells, coarser (a 1, 2, 5 step) once that would draw more than about 120 lines a side
+  let step = 10;
+  for (let k = 0; (size * 2.4) / step > 120; k++) step = [20, 50, 100][k % 3] * 10 ** Math.floor(k / 3);
+  const s = Math.ceil((size * 2.4) / step) * step;
+  const grid = new THREE.GridHelper(s, s / step, 0x6f7a86, 0x4a525b);
   const m = new THREE.Matrix4().makeBasis(frame.x, frame.n, frame.y.clone().negate());
   grid.quaternion.setFromRotationMatrix(m);
   grid.position.copy(frame.origin).addScaledVector(frame.n, 0.02);
@@ -107,7 +110,7 @@ export function drawModel(frame: PlaneFrame, m: SketchModel, st: DrawState, reac
     if (st.hover === h.ref) hov.push(h.p);
     else if (isOn(h.ref, entOf(h.ref))) lit.push(h.p);
     else if (m.entities.get(h.entity)?.builtin) builtin.push(h.p);
-    else plain.push(h.p);
+    else if (m.entities.get(h.entity)?.kind !== 'import_dxf') plain.push(h.p);  // a DXF's thousands of ends: shown when hovered or picked
   }
   if (builtin.length) g.add(points(frame, builtin, COLORS.axis, 7));
   if (plain.length) g.add(points(frame, plain, COLORS.handle, 5));

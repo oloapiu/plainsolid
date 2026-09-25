@@ -1595,6 +1595,51 @@ check('new assembly creates an assembly file and an instance picked from the pro
   await page.keyboard.press('Escape');
 }
 
+// a DXF from outside: the import dialog asks how it opens. As a part, it becomes a plate cut from the
+// outline; the same file opened again from the open menu asks only the mode, and opens as a drawing.
+{
+  const g = (code, v) => `${code}\n${v}\n`;
+  const line = (a, b) => g(0, 'LINE') + g(8, 'CUT') + g(10, a[0]) + g(20, a[1]) + g(30, 0) + g(11, b[0]) + g(21, b[1]) + g(31, 0);
+  const dxf = g(0, 'SECTION') + g(2, 'HEADER') + g(9, '$INSUNITS') + g(70, 4) + g(0, 'ENDSEC') + g(0, 'SECTION') + g(2, 'ENTITIES')
+    + line([0, 0], [60, 0]) + line([60, 0], [60, 40]) + line([60, 40], [0, 40]) + line([0, 40], [0, 0])
+    + g(0, 'CIRCLE') + g(8, 'CUT') + g(10, 20) + g(20, 20) + g(30, 0) + g(40, 5)
+    + g(0, 'TEXT') + g(8, 'NOTES') + g(10, 5) + g(20, 45) + g(30, 0) + g(40, 3) + g(1, 'PLATE') + g(0, 'ENDSEC') + g(0, 'EOF');
+  const outside = path.resolve(PROJ, '..', `plate-${process.pid}.dxf`);
+  fs.writeFileSync(outside, dxf);
+  await page.goto(`${URL}?import=${encodeURIComponent(outside)}`);
+  await page.waitForSelector('[data-testid=import-pop]', { timeout: 20000 });
+  check('a DXF from outside asks whether it opens as a part or a drawing',
+        (await page.locator('[data-testid=import-mode-part]').count()) === 1 && (await page.locator('[data-testid=import-mode-drawing]').count()) === 1);
+  await page.click('[data-testid=import-mode-part]');
+  await page.fill('[data-testid=import-folder]', 'proposals');
+  await page.fill('[data-testid=import-name]', 'plate');
+  await page.click('[data-testid=import-go]');
+  await page.waitForSelector('[data-testid=doc-tab-plate]', { timeout: 30000 });
+  await page.waitForFunction(() => window.__plainsolid.getState().sketchMode?.sketch === 'profile', null, { timeout: 20000 });
+  const part = await page.evaluate(() => window.__plainsolid.getState().tree);
+  const partSrc = fs.readFileSync(path.join(PROJ, 'proposals', 'plate.py'), 'utf8');
+  check('as a part, the DXF becomes a sketch that opens for editing', part.kind === 'part' && part.features.length === 1 && !part.errors.length
+        && fs.existsSync(path.join(PROJ, 'proposals', 'plate.dxf')) && partSrc.includes('import_dxf("outline", "plate.dxf")') && !partSrc.includes('extrude'));
+  await page.keyboard.press('Escape');
+  await page.evaluate(() => window.__plainsolid.actions.exitSketch?.());
+  await page.click('[data-testid=open-menu]');
+  await page.click('[data-testid="file-proposals/plate.dxf"]');
+  await page.waitForSelector('[data-testid=import-pop]', { timeout: 5000 });
+  check('opening a DXF already in the project asks only the mode',
+        (await page.locator('[data-testid=import-folder]').count()) === 0 && (await page.locator('.import-pop .files-title').textContent()).includes('open proposals/plate.dxf'));
+  await page.click('[data-testid=import-mode-drawing]');
+  await page.click('[data-testid=import-go]');
+  await page.waitForSelector('[data-testid=doc-tab-plate_dwg]', { timeout: 30000 });
+  await page.waitForSelector('[data-testid=dwg-view-sheet]', { timeout: 20000 });
+  const dwg = await page.evaluate(() => window.__plainsolid.getState().tree);
+  const view = dwg.evaluation.drawing.views[0];
+  check('as a drawing, the sheet shows the DXF with its text and no model',
+        dwg.kind === 'drawing' && view.dxf === 'plate.dxf' && view.visible.length === 5 && view.texts.some((t) => t.text === 'PLATE') && !dwg.evaluation.drawing.model.error
+        && (await page.locator('[data-testid=new-dimension]').isDisabled()));
+  await page.screenshot({ path: 'shot-dxf-drawing.png' });
+  fs.unlinkSync(outside);
+}
+
 check('no console or page errors', errors.length === 0, errors.slice(0, 3).join(' | '));
 await browser.close();
 const failed = results.filter(([, ok]) => !ok).length;

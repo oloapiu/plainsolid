@@ -100,7 +100,7 @@ def tree(file: Path) -> None:
 def new(file: Path, kind: str = typer.Option("part", help="part, assembly or drawing"),
         name: str | None = typer.Option(None, help="defaults to the file stem"),
         material: str = "al6061",
-        of: str | None = typer.Option(None, help="drawings: the part or assembly file to show")) -> None:
+        of: str | None = typer.Option(None, help="drawings: the part or assembly file to show, or a DXF file")) -> None:
     """Create a new model file from the template and print its tree."""
     ws = Workspace(file.resolve().parent)
     try:
@@ -379,12 +379,13 @@ def _start_server(directory: Path, port: int) -> dict[str, Any]:
 
 
 @app.command("open")
-def open_files(files: list[Path] = typer.Argument(..., help="model or STEP files"),
+def open_files(files: list[Path] = typer.Argument(..., help="model, STEP or DXF files"),
                port: int = typer.Option(DEFAULT_PORT, help="the server's port"),
                root: Path | None = typer.Option(None, help=ROOT_HELP + "; only used to start a server when none runs")) -> None:
     """Open files in the running app, starting the server when none runs. A file inside the
-    project opens as it is; a STEP file from elsewhere goes through the import dialog, which
-    copies it into the project. The browser is raised only when no tab of the app is open."""
+    project opens as it is; a STEP or DXF file from elsewhere goes through the import dialog, which
+    copies it into the project. A DXF file asks there whether it opens as a part or as a
+    drawing. The browser is raised only when no tab of the app is open."""
     import urllib.parse
     import webbrowser
 
@@ -453,11 +454,11 @@ def _launch_command() -> list[str]:
 
 def quick_action(command: list[str]) -> tuple[dict[str, Any], dict[str, Any]]:
     """The two plists of a Finder Quick Action, "Open in plainsolid" in the right-click menu,
-    that runs `command open` on every selected STEP file: document.wflow and Info.plist."""
+    that runs `command open` on every selected STEP or DXF file: document.wflow and Info.plist."""
     import shlex
     import uuid
 
-    script = ('for f in "$@"; do\n  case "$f" in\n    *.step|*.stp|*.STEP|*.STP) '
+    script = ('for f in "$@"; do\n  case "$f" in\n    *.step|*.stp|*.STEP|*.STP|*.dxf|*.DXF) '
               + " ".join(shlex.quote(c) for c in command) + ' open "$f" ;;\n  esac\ndone\n')
     uid = lambda: str(uuid.uuid4()).upper()
     defaults = [("inputMethod", 0), ("source", ""), ("CheckedForUserDefaultShell", False), ("COMMAND_STRING", ""), ("shell", "/bin/sh")]
@@ -542,16 +543,18 @@ def _install_quick_action(command: list[str]) -> list[Path]:
 
 
 def desktop_entry(command: list[str]) -> tuple[str, str]:
-    """A freedesktop launcher registering plainsolid for STEP files ("Open with" in the file
-    manager) and the MIME package that names them: plainsolid.desktop and plainsolid.xml."""
+    """A freedesktop launcher registering plainsolid for STEP and DXF files ("Open with" in the
+    file manager) and the MIME package that names them: plainsolid.desktop and plainsolid.xml."""
     exe = " ".join(f'"{c}"' if " " in c else c for c in command)
-    desktop = ("[Desktop Entry]\nType=Application\nName=plainsolid\nComment=Open a STEP file in plainsolid\n"
-               f"Exec={exe} open %F\nTerminal=false\nMimeType=model/step;application/step;application/x-step;\n"
+    desktop = ("[Desktop Entry]\nType=Application\nName=plainsolid\nComment=Open a STEP or DXF file in plainsolid\n"
+               f"Exec={exe} open %F\nTerminal=false\nMimeType=model/step;application/step;application/x-step;image/vnd.dxf;\n"
                "Categories=Graphics;Engineering;\n")
     mime = ('<?xml version="1.0" encoding="UTF-8"?>\n'
             '<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">\n'
             '  <mime-type type="model/step">\n    <comment>STEP CAD model</comment>\n'
             + "".join(f'    <glob pattern="*.{ext}"/>\n' for ext in ("step", "stp", "STEP", "STP"))
+            + '  </mime-type>\n  <mime-type type="image/vnd.dxf">\n    <comment>DXF drawing</comment>\n'
+            + "".join(f'    <glob pattern="*.{ext}"/>\n' for ext in ("dxf", "DXF"))
             + "  </mime-type>\n</mime-info>\n")
     return desktop, mime
 
@@ -576,20 +579,20 @@ def _install_desktop_entry(command: list[str]) -> list[Path]:
 
 @app.command("install-launcher")
 def install_launcher() -> None:
-    """Let the file manager open STEP files with plainsolid: on macOS "Open in plainsolid"
+    """Let the file manager open STEP and DXF files with plainsolid: on macOS "Open in plainsolid"
     among the Finder's Quick Actions (right-click), on Linux a desktop entry registered
-    for STEP files. Both call this very executable by its full path, so nothing else needs
+    for STEP and DXF files. Both call this very executable by its full path, so nothing else needs
     setting up; delete the written files to undo."""
     import sys
 
     command = _launch_command()
     if sys.platform == "darwin":
         written = _install_quick_action(command)
-        note = ("in the Finder, right-click a STEP file, Quick Actions, Open in plainsolid; should the submenu "
+        note = ("in the Finder, right-click a STEP or DXF file, Quick Actions, Open in plainsolid; should the submenu "
                 "show only Customize…, pick it and tick Open in plainsolid")
     elif sys.platform.startswith("linux"):
         written = _install_desktop_entry(command)
-        note = "in the file manager, right-click a STEP file, Open with, plainsolid"
+        note = "in the file manager, right-click a STEP or DXF file, Open with, plainsolid"
     else:
         _fail(f"no launcher for {sys.platform}")
         raise AssertionError  # unreachable

@@ -228,6 +228,15 @@ export async function unfillet(entity: string): Promise<boolean> {
   return ok;
 }
 
+/** Turn a DXF import into lines, arcs and circles of the sketch, where it stands. */
+export async function convertDxf(entity: string, sketch?: string): Promise<boolean> {
+  const name = sketch ?? state.sketchMode?.sketch;
+  if (!name) return false;
+  const ok = await edit({ op: 'convert_dxf', sketch: name, entity });
+  if (ok) { setStatus(`${entity} is lines, arcs and circles now`); if (state.sketchMode) patchSketch({ selection: [] }); }
+  return ok;
+}
+
 /** Move a dimension's label: the at= keyword on its statement, one undo step. */
 export async function placeDimensionLabel(name: string, p: [number, number]) {
   const sm = state.sketchMode;
