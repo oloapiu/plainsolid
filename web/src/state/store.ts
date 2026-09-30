@@ -180,3 +180,5 @@ export type {
   State,
   Tool,
 } from './core';
+export { acceptHint, askHint, dismissHint, loadSuggestStatus, openHint, recheckSuggest, setSuggestProfile, touchedFeature } from './suggest';
+export type { HintState } from './suggest';

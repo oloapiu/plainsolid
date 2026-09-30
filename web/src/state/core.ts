@@ -14,12 +14,14 @@ import type {
   PlaneInfo,
   ProjectFile,
   SectionSpec,
+  SuggestStatus,
   Summary,
   Tree,
   ViewSnapshot,
   ImportItem,
 } from '../api/types';
 import type { Corner, DimLock } from '../sketch/model';
+import type { HintState } from './suggest';
 
 export type Plane = 'XY' | 'XZ' | 'YZ';
 export type SketchTool = 'line' | 'circle' | 'arc' | 'rect' | 'slot' | 'polygon' | 'point' | 'trim' | 'dimension' | 'project' | 'offset' | null;
@@ -141,6 +143,9 @@ export interface State {
   contextMenu: ContextMenuState | null;  // the right-click menu, entries computed where the click landed
   codeReveal: number;               // bumps when something wants the code pane shown
   summary: { revision: string; data: Summary } | null;        // the part overview's numbers, for the hash they were computed against
+  suggest: SuggestStatus | null;    // the model profiles configured for suggestions (never a key)
+  suggestProfile: string | null;    // the profile the hint box asks; remembered in the browser
+  hint: HintState | null;           // the open hint box: its context, what was asked, the proposal
   version: number;              // bumps on every state change, for effects
 }
 
@@ -153,7 +158,7 @@ const initial: State = {
   measure: { picks: [], result: null, pending: false }, pins: [], named: {}, camera: null, cameraToApply: null, fitPending: false,
   viewsWarning: null, showPlanes: false, ortho: false, orthoBeforeSketch: null, ghostMesh: null, ghostStyle: 'ghost',
   planeDialog: null, featureDialog: null, dialogPicks: [], pickRequest: null, queries: null, files: [], filesRoot: '', imports: [],
-  moveMode: 'translate', posePreview: null, previewNote: null, drawingTool: null, drawingPicks: [], dimKind: 'auto', busy: 0, deleteConfirm: null, treeHover: null, summary: null, refHighlight: [], contextMenu: null, codeReveal: 0, version: 0,
+  moveMode: 'translate', posePreview: null, previewNote: null, drawingTool: null, drawingPicks: [], dimKind: 'auto', busy: 0, deleteConfirm: null, treeHover: null, summary: null, refHighlight: [], contextMenu: null, codeReveal: 0, suggest: null, suggestProfile: null, hint: null, version: 0,
 };
 
 export let state: State = initial;

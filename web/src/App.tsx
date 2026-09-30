@@ -8,8 +8,9 @@ import {
   dismissViewsWarning, isAssembly, isDrawing, fmt, requestPick,
   closeDocument, exportDocument, setMoveMode,
   setOverlay, requestDelete, select, openFeatureDialog, openPlaneDialog, setDrawingTool, setDeleteConfirm,
-  requestImport, quitServer,
+  requestImport, quitServer, loadSuggestStatus, openHint,
 } from './state/store';
+import { uiContext } from './viewport/HintBox';
 import { DrawingSheet } from './drawing/DrawingSheet';
 import { Menu } from './Menu';
 import { Help } from './Help';
@@ -39,6 +40,7 @@ export function App() {
   const sectionSeconds = useStore((s) => s.sectionSeconds);
   const viewsWarning = useStore((s) => s.viewsWarning);
   const tree = useStore((s) => s.tree);
+  const suggestOn = useStore((s) => s.suggest?.enabled ?? false);
   const pickRequest = useStore((s) => s.pickRequest);
   const selected = useStore((s) => s.selected);
   const selectedFace = useStore((s) => s.selectedFace);
@@ -95,7 +97,7 @@ export function App() {
   useEffect(() => remember('plainsolid.codeHeight', String(codeHeight)), [codeHeight]);
   useEffect(() => { if (codeReveal) setCodeOpen(true); }, [codeReveal]);
 
-  useEffect(() => { start(); }, []);
+  useEffect(() => { start(); void loadSuggestStatus(); }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -112,6 +114,7 @@ export function App() {
       if (mod && e.key.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
       if (mod && e.key === '`') { e.preventDefault(); setCodeOpen((o) => !o); return; }
       if (e.key === '?' && !mod) { setHelp((h) => !h); return; }
+      if (e.key === '/' && !mod && !isDrawing(tree)) { e.preventDefault(); openHint(uiContext()); return; }
       if (e.key === 'Escape') {
         if (help) { setHelp(false); return; }
         if (deleteConfirm) { setDeleteConfirm(null); return; }
@@ -191,7 +194,7 @@ export function App() {
     : drawing ? 'drag a view, dimension or note to move it · scroll zooms · right-click for actions'
     : selectedEdge !== null ? 'edge selected · right-click: fillet, chamfer, plane, measure · delete removes its feature'
     : selectedFace !== null ? 'face selected · right-click: sketch here, plane, normal to (ctrl+0)'
-    : 'click a face or an edge · right-click for actions · ? lists the keys';
+    : `click a face or an edge · right-click for actions${suggestOn ? ' · / asks for an edit' : ''} · ? lists the keys`;
   const rows = `36px ${viewsWarning ? '24px ' : ''}1fr ${codeOpen ? Math.min(600, Math.max(120, codeHeight)) : 24}px 22px`;
 
   return (

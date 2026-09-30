@@ -21,6 +21,7 @@ dependencies = [
     "reportlab>=5.0.1",
     "svglib>=2.2.0",
     "mcp>=2.2.0",
+    "httpx>=0.28",
 ]
 
 [project.scripts]

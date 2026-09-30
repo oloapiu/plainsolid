@@ -3,6 +3,7 @@ strict clients of this. One server per project directory, localhost only."""
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import functools
 import os
 import threading
@@ -26,6 +27,7 @@ from . import query as pquery
 from . import refs as prefs
 from . import render as prender
 from . import section as psection
+from . import suggest as psuggest
 from . import views as pviews
 from .edit import EditError
 from .operations import EditOperation, EditRequest
@@ -126,6 +128,18 @@ class PreviewRequest(BaseModel):
     choose_flip: bool = False
 
 
+class SuggestRequest(BaseModel):
+    hint: str
+    context: dict[str, Any] = {}  # what the GUI shows: mode, sketch, selection (as selector expressions), selected feature
+    profile: str | None = None    # a profile of the configuration; its default when absent
+
+
+class SuggestOutcome(BaseModel):
+    id: str                        # the suggestion's id
+    outcome: str                   # accepted, edited, dismissed, failed
+    detail: str | None = None
+
+
 class DragRequest(BaseModel):
     instance: str
     poses: dict[str, Any] | None = None
@@ -163,6 +177,29 @@ def create_app(root: str | Path | None = None, serve_client: bool = True) -> Fas
     async def run(fn, *args):
         return await asyncio.get_running_loop().run_in_executor(app.state.kernel, functools.partial(fn, *args))
 
+    async def waiting_on_model(fn, *args):
+        """Run work that mostly waits on a language model on a daemon thread: stopping the server
+        abandons it rather than waiting for the model, as an executor's thread would make it."""
+        loop = asyncio.get_running_loop()
+        done: asyncio.Future = loop.create_future()
+
+        def settle(result: Any = None, error: BaseException | None = None) -> None:
+            if not done.done():
+                done.set_exception(error) if error is not None else done.set_result(result)
+
+        def go() -> None:
+            try:
+                result = fn(*args)
+            except BaseException as exc:  # noqa: BLE001 - handed to the awaiting request
+                with contextlib.suppress(RuntimeError):  # the loop closed: the server is stopping
+                    loop.call_soon_threadsafe(settle, None, exc)
+            else:
+                with contextlib.suppress(RuntimeError):
+                    loop.call_soon_threadsafe(settle, result)
+
+        threading.Thread(target=go, daemon=True, name="suggest").start()
+        return await done
+
     def _doc(doc_id: str) -> OpenDocument:
         try:
             return ws.get(doc_id)
@@ -177,6 +214,16 @@ def create_app(root: str | Path | None = None, serve_client: bool = True) -> Fas
             loop.call_soon_threadsafe(q.put_nowait, payload)
 
     ws.listeners.append(_listener)
+
+    # suggestions call the model from a plain thread and only their checks from the kernel's
+    suggestions = psuggest.Service(ws, kernel=lambda fn: app.state.kernel.submit(fn).result())
+    app.state.suggestions = suggestions
+
+    def _suggest_listener(doc_id: str, payload: dict[str, Any]) -> None:
+        if payload.get("event") in ("changed", "external") and doc_id in ws.docs:
+            suggestions.changed(ws.docs[doc_id])
+
+    ws.listeners.append(_suggest_listener)
 
     @app.middleware("http")
     async def _activity(request: Request, call_next):
@@ -223,6 +270,10 @@ def create_app(root: str | Path | None = None, serve_client: bool = True) -> Fas
     @app.exception_handler(SelectorError)
     async def _selector_error(_: Request, exc: SelectorError):
         return JSONResponse({"error": str(exc)}, status_code=400)
+
+    @app.exception_handler(psuggest.SuggestError)
+    async def _suggest_error(_: Request, exc: psuggest.SuggestError):
+        return JSONResponse({"error": str(exc)}, status_code=502)
 
     @app.exception_handler(pcompare.CompareError)
     async def _compare_error(_: Request, exc: pcompare.CompareError):
@@ -484,6 +535,33 @@ def create_app(root: str | Path | None = None, serve_client: bool = True) -> Fas
             raise HTTPException(400, str(exc)) from None
         return Response(pmesh.encode(m, extra=extra), media_type="application/octet-stream")
 
+    # --- suggestions -----------------------------------------------------
+
+    @app.get("/api/suggest")
+    def suggest_status() -> dict[str, Any]:
+        """The configured profiles and whether each can be asked; never a key."""
+        return suggestions.status()
+
+    @app.post("/api/documents/{doc_id}/suggest")
+    async def suggest(doc_id: str, req: SuggestRequest) -> dict[str, Any]:
+        """One edit proposed by the model from the hint and the GUI's context, checked by
+        evaluating it; nothing is written. A newer request for the document cancels this one."""
+        d = _doc(doc_id)
+        return await waiting_on_model(suggestions.suggest, d, req.hint, req.context, req.profile)
+
+    @app.post("/api/documents/{doc_id}/suggest/prewarm")
+    async def suggest_prewarm(doc_id: str, profile: str | None = None) -> dict[str, Any]:
+        """Send the document to the profile's cache in the background, as the hint box opens."""
+        d = _doc(doc_id)
+        threading.Thread(target=suggestions.prewarm, args=(d, profile), daemon=True, name="suggest-prewarm").start()
+        return {"started": True}
+
+    @app.post("/api/suggest/outcome")
+    def suggest_outcome(req: SuggestOutcome) -> dict[str, Any]:
+        """What the person did with a suggestion, for the journal."""
+        suggestions.record({"event": "outcome", **req.model_dump()})
+        return {"ok": True}
+
     @app.post("/api/documents/{doc_id}/drag")
     async def drag(doc_id: str, req: DragRequest) -> dict[str, Any]:
         """One step of dragging an instance along the motions its mates leave free; nothing is written."""
@@ -626,6 +704,8 @@ def serve(root: str | Path | None = None, host: str = "127.0.0.1", port: int = D
     app.state.idle_minutes = idle_minutes
     for p in open_paths or []:
         app.state.workspace.open(p)
-    server = uvicorn.Server(uvicorn.Config(app, host=host, port=port, log_level="info"))
+    # requests still running when the server stops (a suggestion waiting on its model) get two
+    # seconds, then are cancelled: ctrl+c never waits for a model
+    server = uvicorn.Server(uvicorn.Config(app, host=host, port=port, log_level="info", timeout_graceful_shutdown=2))
     app.state.server = server  # so /api/shutdown and the idle exit can stop it
     server.run()

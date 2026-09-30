@@ -1,4 +1,4 @@
-import type { DocSummary, DragResult, DxfMode, EditOp, EditResult, MeasureRef, MeasureResult, Overlay, PreviewResult, ProjectFile, SectionSpec, SketchSolution, Tree, ViewsState, WorkspaceEvent, WsEvent } from './types';
+import type { DocSummary, DragResult, DxfMode, EditOp, EditResult, MeasureRef, MeasureResult, Overlay, PreviewResult, ProjectFile, SectionSpec, SketchSolution, SuggestContext, SuggestStatus, Suggestion, Tree, ViewsState, WorkspaceEvent, WsEvent } from './types';
 import { parseMesh, type ParsedMesh } from './mesh';
 
 export class ApiError extends Error {
@@ -110,4 +110,11 @@ export const api = {
   uploadFile: (file: Blob, folder: string, name: string, suffix: string, mode?: DxfMode) =>
     fetch(`/api/documents/upload?${new URLSearchParams({ folder, name, suffix, ...(mode ? { mode } : {}) })}`, { method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: file }).then(json<Tree>),
   shutdown: () => post('/api/shutdown', {}).then(json<{ stopping: boolean }>),
+  suggestStatus: () => fetch('/api/suggest').then(json<SuggestStatus>),
+  suggest: (id: string, hint: string, context: SuggestContext, profile: string | null, signal?: AbortSignal) =>
+    fetch(`/api/documents/${id}/suggest`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ hint, context, profile }), signal }).then(json<Suggestion>),
+  suggestPrewarm: (id: string, profile: string | null) =>
+    post(`/api/documents/${id}/suggest/prewarm${profile ? `?${new URLSearchParams({ profile })}` : ''}`, {}).then(json<{ started: boolean }>),
+  suggestOutcome: (id: string, outcome: 'accepted' | 'edited' | 'dismissed' | 'failed', detail?: string) =>
+    post('/api/suggest/outcome', { id, outcome, detail }).then(json<{ ok: boolean }>),
 };

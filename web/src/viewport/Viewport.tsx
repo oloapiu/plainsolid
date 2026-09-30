@@ -15,6 +15,7 @@ function standardPlane(name: string, size: number): PlaneInfo {
 }
 import { SketchOverlay } from '../sketch/SketchOverlay';
 import { SectionPanel } from './SectionPanel';
+import { HintBox } from './HintBox';
 
 export const sceneRef: { current: Scene3D | null } = { current: null };
 export { planeFrame, frameFromInfo } from './scene';
@@ -205,6 +206,7 @@ export function Viewport() {
       {!sketchMode && <HeadsUp />}
       {tool === 'section' && !sketchMode && <SectionPanel />}
       {tool === 'move' && !sketchMode && <MovePanel />}
+      <HintBox />
       {tool === 'measure' && !sketchMode && (
         <div className="tool-hint" data-testid="measure-hint">
           measure: {measure.picks.length === 0 ? 'click a face, edge or vertex' : measure.picks.length === 1 ? 'click a second entity, or pin the description' : 'two entities picked'} · esc clears
