@@ -145,6 +145,7 @@ Views and manual dimensions, not full drafting.
 | Layout | Feature tree left, viewport centre, property panel right, code pane below. The side panels resize and collapse; the code pane resizes and hides. Three-way highlighting between tree, viewport and code. |
 | Editing surface | The property panel and right-click menus are primary, the code pane secondary. Every dialog previews its result through a no-write server evaluation before anything is written. |
 | Selection | Faces and edges pick everywhere, vertices only where a tool wants them. A click writes the most specific stable selector: semantic when the identity map has a label, otherwise a predicate plus a reducer. |
+| Suggestions | `/` asks a language model (any OpenAI-compatible endpoint, chosen from named profiles in a configuration file whose keys stay in environment variables) for one edit from a few typed words and the selection, given as the selectors a click writes. The engine evaluates each answer before it is shown and gives the model the verdict for one more try; softer guards travel with the proposal as notes (it deletes something the hint did not mention, the geometry does not change, a number from the hint is missing). The proposal previews like a dialog's and is written only when accepted, as one edit. Off without a configuration file. |
 
 ### Server, CLI and files
 
@@ -353,6 +354,10 @@ POST   /documents/{id}/render {view, width, height, highlight, section, overlay,
 POST   /documents/{id}/compare {other, rev, upto}   volumes and regions added and removed
 POST   /documents/{id}/export {format, path}   step, stl; a drawing: svg, dxf, pdf
 GET    /documents/{id}/views | PUT {views}     the sidecar view state
+GET    /suggest                                the configured model profiles and whether each can be asked (never a key)
+POST   /documents/{id}/suggest {hint, context, profile}   one edit proposed by the model, checked, not written; 502 when it fails
+POST   /documents/{id}/suggest/prewarm?profile   send the document to the profile's prompt cache in the background
+POST   /suggest/outcome      {id, outcome}     accepted, edited, dismissed or failed, for the journal
 WS     /documents/{id}/events                  hello, changed, external, dependency
 WS     /events                                 one per tab: hello, open-request
 ```
@@ -394,6 +399,7 @@ plainsolid tree FILE                     also accepts a .step file
 plainsolid query FILE KIND [--upto F]
 plainsolid measure FILE REF [REF] [--plane P --offset D --flip]
 plainsolid edit FILE OP_JSON [--dry-run]
+plainsolid suggest FILE HINT [--select SELECTOR]... [--feature F] [--sketch S --entity E...] [--profile P] [--apply]
 plainsolid render FILE -o out.png --view V --size WxH [--highlight SELECTOR|FEATURE]... [--plane ...] [--overlay OTHER | --rev REV]
 plainsolid compare FILE [OTHER | --rev REV] [-o overlay.png]
 plainsolid export FILE -o out.step|out.stl     a drawing: out.pdf|out.dxf|out.svg

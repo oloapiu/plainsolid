@@ -427,3 +427,27 @@ table.bom td:last-child { text-align: right; }
 .sketch-selected .sel-names { flex: 1; min-width: 0; text-transform: none; letter-spacing: 0; font-family: var(--mono); font-size: 11px; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 0; }
 .sketch-selected .sel-group { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 5px; }
 .sketch-selected .sel-sep { width: 6px; }
+
+/* the hint box: a few words in, one proposed edit out */
+.hint-box { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); width: min(560px, calc(100% - 32px)); z-index: 5;
+  background: var(--bg2); border: 1px solid var(--line); border-radius: 4px; box-shadow: 0 4px 16px rgba(0,0,0,0.35); padding: 8px; outline: none; }
+.hint-box:focus-within, .hint-box:focus { border-color: var(--accent); }
+.hint-row { display: flex; gap: 6px; }
+.hint-profile { flex: 0 0 auto; max-width: 140px; }
+.hint-setup code { font-family: var(--mono); color: var(--fg); }
+.hint-input { flex: 1; min-width: 0; width: 100%; background: var(--bg3); color: var(--fg); border: 1px solid var(--line); border-radius: 3px; padding: 5px 8px; font-size: 13px; }
+.hint-input:focus { outline: none; border-color: var(--accent); }
+.hint-context { color: var(--fg2); font-size: 10px; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hint-status { margin-top: 6px; color: var(--fg2); display: flex; align-items: center; gap: 8px; }
+.hint-error { margin-top: 6px; color: var(--err); }
+.hint-proposal { margin-top: 6px; border-top: 1px solid var(--line); padding-top: 6px; }
+.hint-label { font-weight: 600; }
+.hint-note { color: var(--warn); font-size: 11px; margin-top: 2px; }
+.hint-note::before { content: '⚠ '; }
+.hint-info { color: var(--fg2); font-size: 11px; margin-top: 2px; }
+.hint-diff { margin: 6px 0 0; max-height: 180px; overflow: auto; background: var(--bg); border: 1px solid var(--line); border-radius: 3px;
+  padding: 4px 6px; font: 11px/1.35 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.hint-diff .add { color: var(--ok); }
+.hint-diff .del { color: var(--err); }
+.hint-actions { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+.hint-time { margin-left: auto; color: var(--fg2); font-size: 10px; }

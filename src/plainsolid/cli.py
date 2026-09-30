@@ -193,6 +193,37 @@ def edit(file: Path, op: str = typer.Argument(..., help="JSON edit operation, or
 
 
 @app.command()
+def suggest(file: Path, hint: str = typer.Argument(..., help="what to do, in a few words"),
+            select: list[str] = typer.Option([], "--select", help="a selected face or edge as a selector; repeatable"),
+            feature: str | None = typer.Option(None, help="the feature selected in the tree"),
+            sketch: str | None = typer.Option(None, help="the sketch being edited"),
+            entity: list[str] = typer.Option([], "--entity", help="a selected sketch entity (with --sketch); repeatable"),
+            profile: str | None = typer.Option(None, help="a profile of the configuration; its default otherwise"),
+            apply: bool = typer.Option(False, help="write the proposal when it passes the checks")) -> None:
+    """Ask the suggestion model (configured in ~/.config/plainsolid/suggest.toml, see the README)
+    for one edit: the proposal, its diff and the checks' notes; nothing is written unless --apply."""
+    from . import suggest as psuggest
+
+    ws, doc = _open(file)
+    context: dict[str, Any] = {"mode": "sketch" if sketch else "part",
+                               "selection": entity if sketch else [{"expr": e} for e in select]}
+    if sketch:
+        context["sketch"] = sketch
+    if feature:
+        context["selected_feature"] = feature
+    try:
+        out = psuggest.Service(ws).suggest(doc, hint, context, profile)
+    except psuggest.SuggestError as exc:
+        _fail(str(exc))
+    if apply and out.get("ok"):
+        try:
+            out["applied"] = ws.apply(doc, out["op"], out["hash"])
+        except (EditError, StaleHashError) as exc:
+            _fail(str(exc))
+    _out(out)
+
+
+@app.command()
 def render(file: Path, output: Path = typer.Option(Path("render.png"), "-o", "--output"),
            view: str = typer.Option("iso", help="iso, front, back, top, bottom, left or right"),
            size: str = "800x600",

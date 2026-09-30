@@ -18,6 +18,7 @@ export function Help({ onClose }: { onClose: () => void }) {
               <Row keys={['ctrl+`']} what="show or hide the code pane" />
               <Row keys={['delete']} what="delete the selected feature, instance, mate, view, dimension or note (asks when others go with it)" />
               <Row keys={['esc']} what="cancel a pick, a tool or a dialog, else clear the selection" />
+              <Row keys={['/']} what="ask for an edit in a few words: the configured model proposes one for the selection, previewed; enter accepts, e accepts and opens the code, esc dismisses" />
               <Row keys={['?']} what="this card" />
             </tbody></table>
             <h3>viewport</h3>

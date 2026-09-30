@@ -52,6 +52,10 @@ async function fixture() {
     events: (id, cb) => { events.set(id, cb); return () => events.delete(id); },
     files: async () => ({ root: '/p', files: [] }),
     workspaceEvents: () => () => {},
+    suggestStatus: async () => ({ enabled: false, config: '/home/u/.config/plainsolid/suggest.toml', profiles: [] }),
+    suggest: async () => ({ ok: false, id: 'none', error: 'no model' }),
+    suggestPrewarm: async (id, profile) => { calls.push(['prewarm', id, profile]); return { started: true }; },
+    suggestOutcome: async (id, outcome) => { calls.push(['outcome', id, outcome]); return { ok: true }; },
   };
   const modules = new Map();
   const synthetic = (name, values) => new vm.SyntheticModule(Object.keys(values), function () {
@@ -410,4 +414,116 @@ test('a failed import keeps the file queued for another name', async () => {
   assert.equal(await s.importNext('proposals', 'node_v4'), false);
   assert.equal(s.getState().imports.length, 1);
   assert.equal(s.getState().error, 'already exists: node_v4.step');
+});
+
+const FILLET = { op: 'add_feature', kind: 'fillet', name: 'round1', args: { edges: { expr: 'body.edges.top' }, radius: 3 } };
+const proposal = (hash, extra = {}) => ({ ok: true, id: 's1', hint: '3mm fillet', hash, label: 'fillet 3 mm', op: FILLET,
+  diff: '+round1 = fillet(...)', notes: [], sketches: {}, error: null, seconds: 1.2, attempts: [], ...extra });
+const CONTEXT = { mode: 'part', selection: [{ kind: 'edge', expr: 'body.edges.top', label: 'body top' }] };
+const profile = (name, ready = true) => ({ name, model: `model-${name}`, api: 'llamacpp', reasoning: 'low', reasoning_budget: 1000,
+  ready, problem: ready ? null : `${name.toUpperCase()}_KEY is not set in the environment the server runs in` });
+const ON = { enabled: true, default: 'spark', config: '/c/suggest.toml', profiles: [profile('spark'), profile('flash', false)] };
+
+test('the hint box stays shut without a model; with one it asks, previews and accepts as one edit', async () => {
+  const { store: s, api, docs, calls } = await fixture();
+  await s.useDocument('a');
+  await s.loadSuggestStatus();
+  assert.equal(s.openHint(CONTEXT), true);
+  assert.equal(s.getState().hint.setup, true);                 // it opens to say how to configure a model
+  await s.askHint('3mm fillet');
+  assert.equal(s.getState().hint.asked, null);
+  assert.equal(calls.filter(c => c[0] === 'prewarm').length, 0);
+  api.suggestStatus = async () => ON;
+  await s.recheckSuggest();
+  assert.equal(s.getState().hint.setup, false);
+  assert.equal(s.getState().suggestProfile, 'spark');
+  assert.deepEqual(calls.filter(c => c[0] === 'prewarm'), [['prewarm', 'a', 'spark']]);
+  const asked = [], previewed = [];
+  api.suggest = async (id, hint, context, profile) => { asked.push([id, hint, context, profile]); return proposal(docs.a.hash); };
+  api.previewMesh = async (id, op) => { previewed.push(op.name); return { header: { ok: true, faces: 3 } }; };
+  await s.askHint('  3mm fillet ');
+  assert.deepEqual(asked, [['a', '3mm fillet', CONTEXT, 'spark']]);
+  assert.equal(s.getState().hint.proposal.label, 'fillet 3 mm');
+  await tick();
+  assert.deepEqual(previewed, ['round1']);
+  assert.equal(await s.acceptHint(), 'round1');
+  assert.equal(calls.filter(c => c[0] === 'edit').length, 1);
+  assert.deepEqual(calls.filter(c => c[0] === 'outcome'), [['outcome', 's1', 'accepted']]);
+  assert.equal(s.getState().hint, null);
+  assert.equal(s.getState().status, 'applied: fillet 3 mm');
+});
+
+test('a proposal for an older file is refused; a dismissed one is reported and its preview cleared', async () => {
+  const { store: s, api, docs, calls } = await fixture();
+  await s.useDocument('a');
+  api.suggestStatus = async () => ON;
+  await s.loadSuggestStatus();
+  api.previewMesh = async () => ({ header: { ok: true, faces: 1 } });
+  s.openHint(CONTEXT);
+  api.suggest = async () => proposal('an-older-hash');
+  await s.askHint('3mm fillet');
+  assert.equal(await s.acceptHint(), null);
+  assert.match(s.getState().hint.error, /changed since/);
+  assert.equal(calls.filter(c => c[0] === 'edit').length, 0);
+  api.suggest = async () => proposal(docs.a.hash, { id: 's2' });
+  await s.askHint('3mm fillet');
+  await tick();
+  s.dismissHint();
+  assert.equal(s.getState().hint, null);
+  assert.equal(s.getState().previewNote, null);
+  assert.deepEqual(calls.filter(c => c[0] === 'outcome'), [['outcome', 's2', 'dismissed']]);
+});
+
+test('a newer hint wins over one still thinking; a failed one says why', async () => {
+  const { store: s, api, docs, calls } = await fixture();
+  await s.useDocument('a');
+  api.suggestStatus = async () => ON;
+  await s.loadSuggestStatus();
+  api.previewMesh = async () => ({ header: { ok: true, faces: 1 } });
+  s.openHint(CONTEXT);
+  const gate = deferred();
+  api.suggest = async (id, hint) => {
+    if (hint === 'slow') { await gate.promise; return proposal(docs.a.hash, { id: 'old', label: 'old' }); }
+    return proposal(docs.a.hash, { id: 'new', label: 'new' });
+  };
+  const slow = s.askHint('slow');
+  await s.askHint('fast');
+  gate.resolve(); await slow;
+  assert.equal(s.getState().hint.proposal.label, 'new');
+  api.suggest = async () => ({ ok: false, id: 'f1', error: 'no proposal passed the checks: matches nothing', attempts: [] });
+  await s.askHint('nonsense');
+  assert.match(s.getState().hint.error, /matches nothing/);
+  assert.equal(s.getState().hint.pending, false);
+  assert.deepEqual(calls.filter(c => c[0] === 'outcome').at(-1), ['outcome', 'f1', 'failed']);
+});
+
+test('touchedFeature names what an operation adds or changes', async () => {
+  const { store: s } = await fixture();
+  assert.equal(s.touchedFeature(FILLET), 'round1');
+  assert.equal(s.touchedFeature({ op: 'set_argument', feature: 'outer', kwarg: 'distance', value: 3 }), 'outer');
+  assert.equal(s.touchedFeature({ op: 'add_constraint', sketch: 'slots', kind: 'horizontal', name: 'h', refs: ['slot1.axis'] }), 'slots');
+  assert.equal(s.touchedFeature({ op: 'batch', ops: [{ op: 'delete_feature', feature: 'outer' }, { ...FILLET, name: 'outer' }] }), 'outer');
+  assert.equal(s.touchedFeature({ op: 'set_parameter', name: 'hole_d', value: 6.4 }), null);
+});
+
+test('the profile to ask: the default, else the one chosen before; one without its key cannot be chosen', async () => {
+  const { store: s, api, docs, calls } = await fixture();
+  await s.useDocument('a');
+  api.suggestStatus = async () => ({ ...ON, default: 'flash', profiles: [profile('spark'), profile('flash', false), profile('luna')] });
+  await s.loadSuggestStatus();
+  assert.equal(s.getState().suggestProfile, 'spark');           // the default is not ready: the first that is
+  s.setSuggestProfile('flash');
+  assert.equal(s.getState().suggestProfile, 'spark');
+  s.openHint(CONTEXT);
+  s.setSuggestProfile('luna');
+  assert.equal(s.getState().suggestProfile, 'luna');
+  assert.deepEqual(calls.filter(c => c[0] === 'prewarm').map(c => c[2]), ['spark', 'luna']);  // the new model warms at once
+  await s.loadSuggestStatus();
+  assert.equal(s.getState().suggestProfile, 'luna');            // a reload keeps the choice
+  const asked = [];
+  api.previewMesh = async () => ({ header: { ok: true, faces: 1 } });
+  api.suggest = async (id, hint, context, name) => { asked.push(name); return proposal(docs.a.hash, { profile: name, model: `model-${name}` }); };
+  await s.askHint('3mm fillet');
+  assert.deepEqual(asked, ['luna']);
+  assert.equal(s.getState().hint.proposal.model, 'model-luna');
 });

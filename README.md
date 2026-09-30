@@ -257,6 +257,60 @@ The MCP server works in-process on the project directory, so a `plainsolid serve
 watching the same directory shows every edit the agent makes, and the agent
 sees every edit made in the browser.
 
+## Suggestions: a hint instead of a dialog
+
+Press `/` in the app, type what should change ("3mm fillet", "M6 holes", "same on the other
+three bosses") and a language model proposes one edit for what you have selected. It is
+checked by evaluating it before you see it, drawn as a preview, and waits: enter writes it (one
+undo step), `e` writes it and opens it in the code pane, esc drops it. Notes under the proposal
+say when it deletes something you did not mention, leaves the geometry as it was, or ignores a
+number from the hint.
+
+To set it up:
+
+1. Write `~/.config/plainsolid/suggest.toml` with one or more profiles, as in the example below.
+2. Put each profile's key in the environment variable it names, e.g.
+   `export OPENROUTER_API_KEY=sk-or-...` in your shell profile.
+3. Start the app from a shell that has those variables: `uv run plainsolid serve`.
+4. Press `/`. The picker lists the profiles; one whose key variable is missing is greyed out
+   with the reason.
+
+Any OpenAI-compatible endpoint works: a local llama.cpp or vLLM server, OpenRouter, OpenAI.
+Write the models you want as profiles in `~/.config/plainsolid/suggest.toml` (or the file
+`PLAINSOLID_SUGGEST_CONFIG` names); the hint box offers them in a picker and remembers your
+choice, and the proposal says which model made it. Keys never go in the file or through the
+browser: each profile names the environment variable holding its key, which must be set where
+`plainsolid serve` runs (a profile whose variable is missing shows as not ready, with the reason).
+Without the file, `/` opens a box that says where it goes, with this example:
+
+```toml
+default = "local"
+
+[profiles.local]              # llama.cpp or vLLM on your network
+base_url = "http://my-server:8000/v1"
+model = "qwen3.6-35b-a3b-q8"
+api = "llamacpp"              # llamacpp, openai or openrouter: how reasoning is switched on
+key_env = "LOCAL_MODEL_KEY"   # the variable holding the key, never the key
+reasoning = "low"             # off, low, medium or high
+reasoning_budget = 1000       # reasoning tokens per call
+
+[profiles.flash]              # OpenRouter
+base_url = "https://openrouter.ai/api/v1"
+model = "qwen/qwen3.8-flash"
+api = "openrouter"
+key_env = "OPENROUTER_API_KEY"
+reasoning = "low"
+reasoning_budget = 1000
+```
+
+The file is read on every request, so edits apply at once. One model's settings at the top
+level, without `[profiles]`, work too.
+
+The same from the command line: `uv run plainsolid suggest parts/mount.py "2mm fillet"
+--select 'body.edges.top' [--profile flash]` prints the proposal, its diff and the notes;
+`--apply` writes it. Hints, proposals and what became of them are kept in
+`.plainsolid-cache/suggest-journal.jsonl` of the project.
+
 ## Development
 
 | Where | What |

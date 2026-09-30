@@ -1,7 +1,8 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
-import { getState, setSection, selectFace, addSketchOn, setShowPlanes, openPlaneDialog, setSketchSelection, openFeatureDialog, pick, select, edit, setOrtho, setSketchTool, useBodyInRelation, exitSketch, addInstance, addMate, fixInstance, fetchAssemblyQueries, selectorTarget, makeEditable, closeDocument, exportDocument, explodeImport, setDrawingTool, drawingPick, placeDimension, addNoteAt, moveDrawingItem, addView, openDocument, newDocument, setTool, setMoveMode, previewMate, clearPosePreview, beginInstanceDrag, moveInstanceDrag, endInstanceDrag, toggleBodySelect, convertBodySelection, previewFeature, clearFeaturePreview, setOverlay, setError } from './state/store';
+import { getState, setSection, selectFace, addSketchOn, setShowPlanes, openPlaneDialog, setSketchSelection, openFeatureDialog, pick, select, edit, setOrtho, setSketchTool, useBodyInRelation, exitSketch, addInstance, addMate, fixInstance, fetchAssemblyQueries, selectorTarget, makeEditable, closeDocument, exportDocument, explodeImport, setDrawingTool, drawingPick, placeDimension, addNoteAt, moveDrawingItem, addView, openDocument, newDocument, setTool, setMoveMode, previewMate, clearPosePreview, beginInstanceDrag, moveInstanceDrag, endInstanceDrag, toggleBodySelect, convertBodySelection, previewFeature, clearFeaturePreview, setOverlay, setError, openHint, askHint, acceptHint, dismissHint, loadSuggestStatus } from './state/store';
+import { uiContext } from './viewport/HintBox';
 import type { EntityKind } from './api/types';
 import { sceneRef } from './viewport/Viewport';
 import { frameFromInfo } from './viewport/scene';
@@ -27,6 +28,8 @@ import './styles.css';
     addInstance, addMate, fixInstance, fetchAssemblyQueries, makeEditable, closeDocument, exportDocument, explodeImport,
     setDrawingTool, drawingPick, placeDimension, addNoteAt, moveDrawingItem, addView, openDocument, newDocument,
     setTool, setMoveMode, previewMate, clearPosePreview, beginInstanceDrag, endInstanceDrag, toggleBodySelect, convertBodySelection, previewFeature, clearFeaturePreview, setOverlay, setError,
+    /** The hint box: open it on the current selection, ask, accept or dismiss. */
+    openHint: () => openHint(uiContext()), askHint, acceptHint, dismissHint, loadSuggestStatus,
     /** The reference point of an entity, the one a nearest() selector is written from. */
     entityCenter: (entity: { kind: EntityKind; id: number }) => sceneRef.current?.entityCenter(entity) ?? null,
     /** Drag the picked instance by a screen delta the way the viewport would. */

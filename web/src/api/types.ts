@@ -1,3 +1,5 @@
+import type { EditOp } from './operations';
+
 export interface DocSummary { id: string; path: string; hash: string; name: string; kind?: string }
 
 /** A model file or STEP file under the project, for choosers. */
@@ -200,3 +202,22 @@ export interface CompareReport {
 }
 /** What the viewport compares the document with: another file, or this file at a git revision. */
 export interface Overlay { other?: string; rev?: string }
+
+/** Suggestions: the configured model profiles (never a key), and what a model proposes. A profile is
+ * ready when the environment variable holding its key is set where the server runs. */
+export interface SuggestProfile { name: string; model: string; api: string; reasoning: string; reasoning_budget: number | null; ready: boolean; problem: string | null }
+export interface SuggestStatus { enabled: boolean; default?: string; config?: string; error?: string; profiles: SuggestProfile[] }
+/** What the GUI shows when a hint is asked: the model sees it as the UI context. */
+export interface SuggestContext {
+  mode: 'part' | 'assembly' | 'drawing' | 'sketch';
+  sketch?: string;
+  selection: ({ kind: string; expr: string; label: string } | string)[];  // faces and edges as selectors; sketch entities by reference
+  selected_feature?: string;
+  selected_instance?: string;
+}
+export interface SuggestAttempt { label: string | null; op: unknown; ok: boolean; error: string | null; notes: string[]; seconds: number; output_tokens: number | null; cut: boolean }
+export interface Suggestion {
+  ok: boolean; id: string; hint: string; hash: string; label: string | null; op: EditOp | null; diff: string | null;
+  notes: string[]; info?: string[]; sketches: Record<string, { dof: number; conflicting: string[]; redundant: string[] }>;
+  error: string | null; seconds: number; attempts: SuggestAttempt[]; cancelled?: boolean; profile?: string; model?: string;
+}

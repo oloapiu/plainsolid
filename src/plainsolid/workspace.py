@@ -258,6 +258,32 @@ class OpenDocument:
             return out
 
 
+def compact_tree(tree: dict[str, Any], d: OpenDocument) -> dict[str, Any]:
+    """The tree without its duplicates and bulk: results only under the features, no source
+    texts, spans as a line, no solved coordinates or projections, a drawing as its summary.
+    What the MCP tools and the suggestion prompt show a model."""
+    out = {k: v for k, v in tree.items() if k not in ("features", "evaluation", "source")}
+    out["features"] = []
+    for f in tree["features"]:
+        g = {k: v for k, v in f.items() if k not in ("arg_texts", "span", "dependents")}
+        if f.get("span"):
+            g["line"] = f["span"][0]
+        r = f.get("result")
+        if r and r.get("sketch"):
+            g["result"] = {**r, "sketch": {k: v for k, v in r["sketch"].items() if k not in ("coords", "projected")}}
+        out["features"].append(g)
+    ev = tree.get("evaluation") or {}
+    out["evaluation"] = {k: v for k, v in ev.items() if k not in ("results", "drawing")}
+    if ev.get("drawing"):
+        from . import drawing as pdrawing
+
+        try:
+            out["evaluation"]["drawing"] = pdrawing.summary(d.ensure_evaluated())
+        except Exception as exc:  # noqa: BLE001 - a drawing whose model is missing still lists its views
+            out["evaluation"]["drawing"] = {"error": str(exc)}
+    return out
+
+
 class Workspace:
     def __init__(self, root: str | Path | None = None):
         self.root = Path(root or ".").resolve()
@@ -809,6 +835,17 @@ class Workspace:
                         _preview_rank(out) == _preview_rank(best) and out["rotation"] < best["rotation"] - 1e-6):
                     best = out
             return best or {"ok": False, "error": "nothing to preview", "hash": doc.hash}
+
+    def trial(self, doc: OpenDocument, op: dict[str, Any]) -> tuple[str, Document, Evaluation, Evaluation | None]:
+        """Apply an edit in memory and evaluate the result, writing nothing: the new source, its
+        parse, the current evaluation and the trial's (None when the new source does not parse).
+        Raises EditError when the operation does not apply. What a suggestion is checked with."""
+        with doc.lock:
+            base = doc.ensure_evaluated()
+            source = edit_ops.apply(doc.source, validate_operation(op))
+            parsed = parse_document(source, str(doc.path))
+            ev = None if parsed.errors else evaluate(parsed, cache=doc._cache)
+            return source, parsed, base, ev
 
     def preview_mesh(self, doc: OpenDocument, op: dict[str, Any], tolerance: float | None = None) -> tuple[dict, dict[str, Any]]:
         """The mesh of the document with an edit applied, writing nothing, and what the

@@ -23,7 +23,7 @@ from . import refs as prefs
 from . import section as psection
 from .edit import EditError
 from .selectors import SelectorError
-from .workspace import OpenDocument, StaleHashError, Workspace
+from .workspace import OpenDocument, StaleHashError, Workspace, compact_tree
 
 GUIDE = Path(__file__).parent / "agent.md"
 INSTRUCTIONS = """plainsolid is a parametric CAD engine. A model is a Python file (a part, an
@@ -115,7 +115,7 @@ def build_server(root: str | Path | None = None) -> MCPServer:
             if upto:
                 tree["evaluation"] = d.evaluation_for(upto).to_json()
                 tree["upto"] = upto
-            return _compact(tree, d) if compact else tree
+            return compact_tree(tree, d) if compact else tree
         return await _run(go)
 
     @server.tool()
@@ -280,31 +280,6 @@ def build_server(root: str | Path | None = None) -> MCPServer:
         return await _run(go)
 
     return server
-
-
-def _compact(tree: dict[str, Any], d: OpenDocument) -> dict[str, Any]:
-    """The tree without its duplicates and bulk: results only under the features, no source
-    texts, spans as a line, no solved coordinates or projections, a drawing as its summary."""
-    out = {k: v for k, v in tree.items() if k not in ("features", "evaluation", "source")}
-    out["features"] = []
-    for f in tree["features"]:
-        g = {k: v for k, v in f.items() if k not in ("arg_texts", "span", "dependents")}
-        if f.get("span"):
-            g["line"] = f["span"][0]
-        r = f.get("result")
-        if r and r.get("sketch"):
-            g["result"] = {**r, "sketch": {k: v for k, v in r["sketch"].items() if k not in ("coords", "projected")}}
-        out["features"].append(g)
-    ev = tree.get("evaluation") or {}
-    out["evaluation"] = {k: v for k, v in ev.items() if k not in ("results", "drawing")}
-    if ev.get("drawing"):
-        from . import drawing as pdrawing
-
-        try:
-            out["evaluation"]["drawing"] = pdrawing.summary(d.ensure_evaluated())
-        except Exception as exc:  # noqa: BLE001 - a drawing whose model is missing still lists its views
-            out["evaluation"]["drawing"] = {"error": str(exc)}
-    return out
 
 
 def _ref(value: str | dict[str, Any]) -> dict[str, Any] | str:
