@@ -248,13 +248,27 @@ class Model:
 
 # ---- the prompt ----------------------------------------------------------------------------------
 
+# what an evaluation measures about itself (how long, how much came from its cache): new
+# numbers each time the same file is evaluated, so out of the prompt the endpoint caches
+VOLATILE = frozenset({"seconds", "cached"})
+
+
+def _stable(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {k: _stable(v) for k, v in value.items() if k not in VOLATILE}
+    if isinstance(value, list):
+        return [_stable(v) for v in value]
+    return value
+
+
 def system_prompt(path_name: str, source: str, tree: dict[str, Any]) -> str:
-    """Everything that does not change until the file does: cached by the endpoint."""
+    """Everything that does not change until the file does: cached by the endpoint, so the
+    same file gives the same text however often it is evaluated."""
     return "\n\n".join([
         INSTRUCTIONS,
         "# The guide\n\n" + GUIDE.read_text(encoding="utf-8"),
         f"# The document: {path_name}\n\n```python\n{source}\n```",
-        "# Its evaluated tree (compact)\n\n" + json.dumps(tree, separators=(",", ":")),
+        "# Its evaluated tree (compact)\n\n" + json.dumps(_stable(tree), separators=(",", ":")),
     ])
 
 

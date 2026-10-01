@@ -429,3 +429,15 @@ def test_each_request_goes_to_the_profile_it_names(tmp_path: Path, bracket, monk
     assert service.prewarm(doc, "flash") and seen[-1] == ("openrouter.ai", "Bearer k2", True)
     lines = [json.loads(x) for x in (ws.root / CACHE_DIR / sg.JOURNAL).read_text().splitlines()]
     assert [x.get("profile") for x in lines if x["event"] == "suggest"] == ["flash", "spark"]
+
+
+@pytest.mark.unit
+def test_the_same_file_gives_the_same_prompt_however_often_it_is_evaluated(bracket):
+    _, doc = bracket
+    first_tree = compact_tree(doc.tree_json(), doc)
+    doc.evaluation = None                                  # an undo, a dependency change, a restart
+    again_tree = compact_tree(doc.tree_json(), doc)
+    assert first_tree != again_tree                        # the timings moved
+    first = sg.system_prompt(doc.path.name, doc.source, first_tree)
+    assert first == sg.system_prompt(doc.path.name, doc.source, again_tree)
+    assert '"seconds"' not in first and '"cached"' not in first and "hole_cut" in first
