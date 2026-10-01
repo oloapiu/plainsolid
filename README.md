@@ -259,6 +259,11 @@ sees every edit made in the browser.
 
 ## Suggestions: a hint instead of a dialog
 
+![Selecting the front face of a robot head and typing "cut a mouth: a 26 by 5 slot, 12 mm below the centre, 3 deep"; the proposed cut previews in blue with its diff, and enter accepts it; then the same for an antenna on the top face](docs/images/bolt-highlight.gif)
+
+Bolt, a robot head built from eight hints and one circle drawn by hand (an excerpt, at real speed, with
+GPT-6 Luna).
+
 Press `/` in the app, type what should change ("3mm fillet", "M6 holes", "same on the other
 three bosses") and a language model proposes one edit for what you have selected. It is
 checked by evaluating it before you see it, drawn as a preview, and waits: enter writes it (one
