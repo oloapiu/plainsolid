@@ -441,3 +441,19 @@ def test_the_same_file_gives_the_same_prompt_however_often_it_is_evaluated(brack
     first = sg.system_prompt(doc.path.name, doc.source, first_tree)
     assert first == sg.system_prompt(doc.path.name, doc.source, again_tree)
     assert '"seconds"' not in first and '"cached"' not in first and "hole_cut" in first
+
+
+@pytest.mark.unit
+def test_a_feature_size_in_a_sketch_batch_is_not_called_drawn(tmp_path: Path):
+    (tmp_path / "empty.py").write_text('from plainsolid import *\n\nmeta(name="empty")\n')
+    ws = Workspace(tmp_path)
+    doc = ws.open("empty.py")
+    block = {"op": "batch", "ops": [
+        {"op": "add_feature", "kind": "sketch", "name": "s", "args": {"on": "XY"}},
+        {"op": "add_sketch_entity", "sketch": "s", "kind": "rect", "name": "r", "args": {"width": 60, "height": 50}},
+        {"op": "add_constraint", "sketch": "s", "kind": "length", "name": "w", "refs": ["r.width"], "value": 60},
+        {"op": "add_constraint", "sketch": "s", "kind": "length", "name": "h", "refs": ["r.height"], "value": 50},
+        {"op": "add_feature", "kind": "extrude", "name": "block", "args": {"sketch": "s", "depth": 40}}]}
+    assert not any("only drawn" in n for n in judge(ws, doc, block, "a 60x50x40 block").notes)  # 40 is the depth
+    loose = {**block, "ops": [o for o in block["ops"] if o.get("name") != "h"]}
+    assert any("50 from the hint is only drawn" in n for n in judge(ws, doc, loose, "a 60x50x40 block").notes)

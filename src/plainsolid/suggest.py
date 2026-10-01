@@ -478,8 +478,11 @@ def judge(op: Any, hint: str, context: dict[str, Any], source: str,
     if missing:
         notes.append(f"the hint says {', '.join(f'{n:g}' for n in missing)}, which the proposal does not use")
     if touched:
+        # only what an entity is drawn with: a feature's depth or radius in the same batch is no drawing
+        sketched = _numbers([o.get("args", o.get("value")) for o in _ops(op)
+                             if o.get("op") in ("add_sketch_entity", "set_entity_argument")])
         held = _numbers([o.get("value") for o in _ops(op) if o.get("op") in ("add_constraint", "set_constraint_value")])
-        drawn = [n for n in numbers if _meets(n, proposed, sized) and not _meets(n, held, sized)]
+        drawn = [n for n in numbers if _meets(n, sketched, sized) and not _meets(n, held, sized)]
         if drawn:
             notes.append(f"{', '.join(f'{n:g}' for n in drawn)} from the hint is only drawn, not a constraint, so the "
                          "solver can change it: add a dimension (diameter, radius, length, distance) with that value")
