@@ -41,6 +41,11 @@ def test_constraint_ops_compose_human_statements():
     ]})
     assert changed(SRC, n) == ['+s.line("l3", (40, 20), (0, 20.3))', '+s.horizontal("h3", "l3")']
     assert not parse_document(n).errors
+    # a name the sketch already has, entity or constraint, is refused rather than written twice
+    with pytest.raises(edit.EditError, match="already exists"):
+        edit.apply(SRC, {"op": "add_sketch_entity", "sketch": "s", "kind": "line", "name": "l2", "args": {"start": [0, 0], "end": [1, 1]}})
+    with pytest.raises(edit.EditError, match="already exists"):
+        edit.apply(SRC, {"op": "add_constraint", "sketch": "s", "kind": "horizontal", "name": "c0", "refs": ["l1"]})
 
 
 @pytest.mark.roundtrip
@@ -67,6 +72,25 @@ def test_dimension_change_writes_back_in_one_commit(project):
     assert 'profile.line("top", (-26, 60), (-30, 60))' in doc.source
     assert doc.ensure_evaluated().body.volume == pytest.approx(16203.097396 + 10 * 4 * 40)
     assert ws.undo(doc)["changed"] and 'profile.length("h", "outer_wall", height)' in doc.source
+
+
+@pytest.mark.roundtrip
+def test_editing_a_sketch_evaluates_no_further_than_the_sketch(project):
+    ws = Workspace(project)
+    doc = ws.open("bracket.py")
+    doc.tree_json()
+    ws.apply(doc, {"op": "add_sketch_entity", "sketch": "profile", "kind": "line", "name": "guide",
+                   "args": {"start": [0, 100], "end": [10, 100], "construction": True}}, doc.hash)
+    tree = doc.tree_json(upto="profile")
+    results = {f["name"]: f["result"] for f in tree["features"]}
+    names = [f["name"] for f in tree["features"]]
+    after = names[names.index("profile") + 1:]
+    assert results["profile"]["ok"] and after and all(results[n] is None for n in after)
+    assert doc.evaluation is None, "the features after the sketch wait for the whole model to be asked for"
+    m = doc.mesh(upto="profile")
+    assert m["revision"] == tree["revision"] and doc.evaluation is None
+    full = doc.tree_json()
+    assert full["revision"] == tree["revision"] and all(f["result"] is not None for f in full["features"])
 
 
 @pytest.mark.roundtrip

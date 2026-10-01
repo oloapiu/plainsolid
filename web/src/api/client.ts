@@ -64,7 +64,7 @@ export const api = {
   export: (id: string, format: string, path: string) => post(`/api/documents/${id}/export`, { format, path }).then(json<{ path: string; format: string }>),
   openDocument: (path: string, mode?: DxfMode) => post('/api/documents/open', { path, ...(mode ? { mode } : {}) }).then(json<Tree>),
   newDocument: (path: string, kind: 'part' | 'assembly' | 'drawing' = 'part', of?: string) => post('/api/documents/new', { path, kind, ...(of ? { of } : {}) }).then(json<Tree>),
-  tree: (id: string) => fetch(`/api/documents/${id}/tree`).then(json<Tree>),
+  tree: (id: string, upto?: string) => fetch(`/api/documents/${id}/tree${upto ? `?${new URLSearchParams({ upto })}` : ''}`).then(json<Tree>),
   source: (id: string) => fetch(`/api/documents/${id}/source`).then(json<{ source: string; hash: string; path: string }>),
   putSource: (id: string, source: string, hash: string) => put(`/api/documents/${id}/source`, { source, hash }).then(json<EditResult>),
   edit: (id: string, op: EditOp, hash: string) => post(`/api/documents/${id}/edit`, { ...op, hash }).then(json<EditResult>),

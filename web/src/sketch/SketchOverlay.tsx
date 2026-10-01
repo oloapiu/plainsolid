@@ -29,7 +29,9 @@ const TOOLS: { id: SketchTool; label: string; key: string; hint: string }[] = [
 ];
 
 /** A point the cursor snapped to: a handle (coincident), a midpoint, or a point on a curve. */
-interface Snapped { p: Pt; ref: string | null; snap?: 'handle' | 'mid' | 'on' }
+interface Snapped { p: Pt; ref: string | null; snap?: 'handle' | 'mid' | 'on'; after?: Landed }
+/** The line a chain point ends, filled in once its commit is in: the next segment starts coincident with its end. */
+interface Landed { name: string | null }
 /** A value box waiting at a point of the plane: a dimension's value after its placement click, an offset's distance after its side click. */
 type Pending = { kind: 'dimension'; plan: DimensionPlan; at: Pt } | { kind: 'offset'; at: Pt };
 
@@ -55,6 +57,14 @@ export function SketchOverlay() {
   const modelRef = useRef<SketchModel | null>(null);
   const dragRef = useRef<string | null>(null);
   const chainRef = useRef<Snapped | null>(null);
+  // drawing commits go out one after another and clicks never wait for them; each commit is built
+  // when its turn comes, so the names it takes and the segment before it are in the tree by then.
+  // Both outlive a tool switch: what was clicked still lands.
+  const queueRef = useRef<Promise<unknown>>(Promise.resolve());
+  const savingRef = useRef<[Pt, Pt][]>([]);  // line segments clicked but not in yet, drawn until they are
+  // names the queue's commits took: taken even before the tree shows them (a refetch that another
+  // one overtook, an exit's, leaves the tree a commit behind when the next one is built)
+  const committedRef = useRef<{ sketch: string; names: Set<string> }>({ sketch: '', names: new Set() });
   const pendingRef = useRef<Pending | null>(null);
   pendingRef.current = pending;
 
@@ -197,8 +207,12 @@ export function SketchOverlay() {
       setSnapGlyph({ x, y, ...g });
     };
     window.addEventListener('keydown', onMod); window.addEventListener('keyup', onMod);
-    const names = () => sketchNames();
     const sketch = sm.sketch;
+    if (committedRef.current.sketch !== sketch) committedRef.current = { sketch, names: new Set() };
+    const committed = committedRef.current.names;
+    // the sketch drawn in, still after an exit while commits land, and what the queue already wrote to it
+    const names = () => [...sketchNames(sketch), ...committed];
+    const remember = (ops: EditOp[]) => { for (const op of ops) if ('name' in op && op.name) committed.add(op.name); };
     const asConstruction = sm.construction;
     const picks = sm.selection;  // the dimension tool's picks are the selection
     const dashed = asConstruction;  // the rubber band draws like what it will make
@@ -215,8 +229,26 @@ export function SketchOverlay() {
     };
     const pushOp = (ops: EditOp[], op: EditOp | null) => { if (op) { ops.push(op); if ('name' in op && op.name) pendingNames.push(op.name); } };
     const reset = () => { pointsRef.current = []; setNPoints(0); setPreview(null); setSnapGlyph(null); };
+    let alive = true;  // false once the tool or sketch changed: a commit landing late leaves the overlay alone
+    let cursorAt: Pt | null = null;
+    let lastPoint: Pt | null = null;  // a point on its way in: a second click on the same spot is a double-click
 
-    const commitLine = async (a: Snapped, b: Snapped) => {
+    const enqueue = <T,>(work: () => Promise<T>): Promise<T> => {
+      const run = queueRef.current.then(work, work);
+      queueRef.current = run.catch(() => {});
+      return run;
+    };
+    /** The line tool's preview: the segments on their way in, and the band from the chain's end to the cursor. */
+    const lineBand = (to: Pt | null) => {
+      const g = new THREE.Group();
+      for (const [a, b] of savingRef.current) g.add(polyline(frame, [a, b], COLORS.preview, dashed));
+      const c = pointsRef.current[0]?.p;
+      if (c && to) g.add(polyline(frame, [c, to], COLORS.preview, dashed));
+      setPreview(g.children.length ? g : null);
+    };
+    const commitLine = (from: Snapped, b: Snapped, landed: Landed) => enqueue(async () => {
+      // a chain's next segment starts on the end of the one before, which is in the tree by now
+      const a: Snapped = from.ref || !from.after?.name ? from : { ...from, ref: `${from.after.name}.end` };
       const name = nextName('line', names());
       pendingNames = [name];
       const ops: EditOp[] = [entityOp('line', name, { start: a.p, end: b.p })];
@@ -229,18 +261,21 @@ export function SketchOverlay() {
       const tangentTo = tangentArc(a, b.p) ?? tangentArc(b, a.p);
       if (tangentTo) pushOp(ops, constraintOp('tangent', [name, tangentTo]));
       pendingNames = [];
-      const ok = await sketchBatch(ops, `added ${name}${ops.length > 1 ? ` with ${ops.length - 1} constraint(s)` : ''}`);
-      return ok ? name : null;
-    };
-    const commitEntity = async (kind: string, args: Record<string, JsonValue>, coincidences: [string, Snapped][] = []) => {
+      const ok = await sketchBatch(ops, `added ${name}${ops.length > 1 ? ` with ${ops.length - 1} constraint(s)` : ''}`, sketch);
+      if (ok) remember(ops);
+      landed.name = ok ? name : null;
+      return landed.name;
+    });
+    const commitEntity = (kind: string, args: Record<string, JsonValue>, coincidences: [string, Snapped][] = []) => enqueue(async () => {
       const name = nextName(kind === 'project' ? 'proj' : kind, names());
       pendingNames = [name];
       const ops: EditOp[] = [entityOp(kind, name, args)];
       for (const [part, s] of coincidences) pushOp(ops, snapOp(`${name}.${part}`, s));
       pendingNames = [];
-      const ok = await sketchBatch(ops, `added ${name}`);
+      const ok = await sketchBatch(ops, `added ${name}`, sketch);
+      if (ok) remember(ops);
       return ok ? name : null;
-    };
+    });
     const finishPolygon = () => {
       const pts = pointsRef.current;
       if (pts.length >= 3) commitEntity('polygon', { points: pts.map((s) => s.p) });
@@ -251,6 +286,7 @@ export function SketchOverlay() {
       const m = modelRef.current;
       const p: Pt = [round3(u), round3(v)];
       setCursor(p);
+      cursorAt = p;
       const pts = pointsRef.current;
       if (!tool) {
         const hit = m ? hitTest(m, [u, v], tol()) : null;
@@ -287,7 +323,7 @@ export function SketchOverlay() {
       const s = sn.p;
       showGlyph(sn, tool === 'line' ? pts[0] : null);
       const c = pts[0].p;
-      if (tool === 'line') setPreview(polyline(frame, [c, s], COLORS.preview, dashed));
+      if (tool === 'line') lineBand(s);
       else if (tool === 'circle') setPreview(polyline(frame, curvePoints({ ref: '', entity: '', kind: 'circle', c, r: Math.hypot(s[0] - c[0], s[1] - c[1]) }), COLORS.preview, dashed));
       else if (tool === 'arc') {
         if (pts.length === 1) setPreview(polyline(frame, [c, s], COLORS.preview, true));
@@ -321,7 +357,7 @@ export function SketchOverlay() {
         if (!c) return;
         if (!m || !trimmable(m, c.ref)) { const info = m?.entities.get(entityOf(c.ref)); setStatus(info?.builtin ? 'the axes cannot be trimmed' : info?.projected ? `${c.entity} follows other geometry and cannot be trimmed` : `${c.entity} is a ${info?.kind}: its sides cannot be trimmed, draw such an outline with lines`); return; }
         setPreview(null);
-        void trimAt(c.ref, [round3(u), round3(v)]);
+        void enqueue(() => trimAt(c.ref, [round3(u), round3(v)]));
         return;
       }
       if (tool === 'dimension') {
@@ -339,13 +375,28 @@ export function SketchOverlay() {
       const s = snapPoint(u, v);
       const pts = pointsRef.current;
       const same = (a: Pt, b: Pt) => a[0] === b[0] && a[1] === b[1];
-      if (tool === 'point') { commitEntity('point', { at: s.p }); return; }
+      if (tool === 'point') {
+        if (lastPoint && same(lastPoint, s.p)) return;
+        const at = s.p;
+        lastPoint = at;
+        void commitEntity('point', { at }).finally(() => { if (lastPoint === at) lastPoint = null; });
+        return;
+      }
       if (tool === 'line') {
         if (pts.length === 0) { pts.push(s); setNPoints(1); return; }
-        if (same(pts[0].p, s.p)) return;
-        const name = await commitLine(pts[0], s);
-        reset();
-        if (name) { const next: Snapped = { p: s.p, ref: s.ref ?? `${name}.end` }; pointsRef.current = [next]; chainRef.current = next; setNPoints(1); }
+        if (same(pts[0].p, s.p)) return;  // a double-click on the chain's end: nothing more
+        // the chain moves on at once; the segment draws as a preview until its commit is in
+        const from = pts[0], seg: [Pt, Pt] = [from.p, s.p], landed: Landed = { name: null };
+        // the next segment starts on this one's end, or on the point it snapped to; a snap onto a
+        // curve stays with this end, else the chain would only meet on the curve, not at the vertex
+        const next: Snapped = { p: s.p, ref: s.snap === 'handle' ? s.ref : null, after: landed };
+        pointsRef.current = [next];
+        chainRef.current = next;
+        savingRef.current.push(seg);
+        lineBand(s.p);
+        await commitLine(from, s, landed);
+        savingRef.current = savingRef.current.filter((x) => x !== seg);
+        if (alive) lineBand(cursorAt);
       } else if (tool === 'circle') {
         if (pts.length === 0) { pts.push(s); setNPoints(1); return; }
         const d = 2 * Math.hypot(s.p[0] - pts[0].p[0], s.p[1] - pts[0].p[1]);
@@ -511,6 +562,7 @@ export function SketchOverlay() {
     };
     window.addEventListener('keydown', onKey);
     return () => {
+      alive = false;
       window.removeEventListener('keydown', onKey);
       window.removeEventListener('keydown', onMod); window.removeEventListener('keyup', onMod);
       scene.onPlaneMove = () => {}; scene.onPlaneClick = () => {}; scene.onPlaneDoubleClick = () => {}; scene.onPlaneContext = () => {};

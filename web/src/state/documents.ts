@@ -1,6 +1,6 @@
 import { ApiError, api } from '../api/client';
 import { set, state, withBusy } from './core';
-import { cancelMeshFetch, fetchGhost, fetchMesh, statusFor } from './geometry';
+import { cancelMeshFetch, fetchMesh, statusFor } from './geometry';
 import { RequestLane, documentEpoch, invalidateDocumentRequests } from './requests';
 import { enterSketch, syncSketchFrame } from './sketch';
 import { cancelDocumentTools, dragState, setStatus } from './tools';
@@ -261,7 +261,9 @@ export async function refetch() {
   const request = refetchRequests.start();
   set({ loading: true });
   try {
-    const [tree, src] = await withBusy(() => Promise.all([api.tree(id), api.source(id)]));
+    // editing a sketch, like SolidWorks: evaluated up to the sketch, the features after it wait for the exit
+    const upto = state.sketchMode?.sketch;
+    const [tree, src] = await withBusy(() => Promise.all([api.tree(id, upto), api.source(id)]));
     if (!request.current()) return;
     if (tree.hash !== src.hash) { await refetch(); return; }
     const draft = drafts.get(id);
@@ -281,7 +283,6 @@ export async function refetch() {
     set(patch);
     syncSketchFrame(tree);
     await fetchMesh(statusFor(tree));
-    if (state.sketchMode) void fetchGhost();
   } catch (e) {
     if (!request.current()) return;
     set({ error: (e as Error).message, loading: false });

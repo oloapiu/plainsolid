@@ -162,6 +162,7 @@ class OpenDocument:
     _meshes: dict[str, dict] = field(default_factory=dict)
     _cache: Evaluation | None = None  # the last full evaluation; unchanged feature prefixes are reused
     _revision: str = ""
+    _partials: dict[str, tuple[str, Evaluation]] = field(default_factory=dict)  # upto -> (revision, evaluation)
     created: bool = False  # its file was written by this open (a DXF's wrapper), until the caller reports it
 
     @property
@@ -194,8 +195,29 @@ class OpenDocument:
                 return ev
 
     def evaluation_for(self, upto: str | None) -> Evaluation:
-        full = self.ensure_evaluated()
-        return evaluate(full.document, upto=upto, cache=full) if upto else full
+        return self.evaluated(upto)[0]
+
+    def evaluated(self, upto: str | None) -> tuple[Evaluation, str]:
+        """The evaluation rolled back to `upto` (all of it when None) and the revision it is of.
+        A rollback evaluates no further than `upto`: a sketch being edited costs itself, not the
+        features after it, which wait until the model is shown whole again."""
+        with self.lock:
+            if not upto:
+                ev = self.ensure_evaluated()
+                return ev, self._revision
+            while True:
+                revision = self.revision
+                hit = self._partials.get(upto)
+                if hit is not None and hit[0] == revision:
+                    return hit[1], revision
+                current = self.evaluation is not None and self._revision == revision
+                ev = evaluate(self.document, upto=upto, cache=self.evaluation if current else self._cache)
+                if revision != self.revision:
+                    continue
+                kept = {k: v for k, v in self._partials.items() if v[0] == revision}
+                self._partials = kept if len(kept) < 4 else {}
+                self._partials[upto] = (revision, ev)
+                return ev, revision
 
     def mesh(self, upto: str | None = None, section: psection.SectionSpec | None = None,
              tolerance: float | None = None) -> dict:
@@ -204,13 +226,13 @@ class OpenDocument:
         with self.lock:
             from . import mesh as pmesh
 
-            self.ensure_evaluated()
-            key = f"{self._revision}|{upto}|{section.key if section else ''}|{tolerance}"
+            _, revision = self.evaluated(upto)
+            key = f"{revision}|{upto}|{section.key if section else ''}|{tolerance}"
             m = self._meshes.get(key)
             if m is None:
                 items = self.geometry(upto, section)
                 m = pmesh.build(items, self.cache_dir, tolerance) if items else pmesh.empty()
-                m = {**m, "hash": self.hash, "revision": self._revision}
+                m = {**m, "hash": self.hash, "revision": revision}
                 if len(self._meshes) > 16:
                     self._meshes.pop(next(iter(self._meshes)))
                 self._meshes[key] = m
@@ -219,11 +241,11 @@ class OpenDocument:
     def geometry(self, upto: str | None = None, section: psection.SectionSpec | None = None) -> list[Item]:
         """Items for the mesh and measurements, cached per (hash, upto, section)."""
         with self.lock:
-            self.ensure_evaluated()
-            key = f"{self._revision}|{upto}|{section.key if section else ''}"
+            ev, revision = self.evaluated(upto)
+            key = f"{revision}|{upto}|{section.key if section else ''}"
             items = self._geometry.get(key)
             if items is None:
-                items = self.evaluation_for(upto).items()
+                items = ev.items()
                 if section is not None:
                     items = psection.apply(items, section)
                 if len(self._geometry) > 8:
@@ -239,12 +261,13 @@ class OpenDocument:
                 dims.extend(f"{f.variable}.{c.name}" for c in f.constraints if c.is_dimension)
         return {"params": [p.name for p in self.document.params], "dimensions": dims}
 
-    def tree_json(self) -> dict[str, Any]:
+    def tree_json(self, upto: str | None = None) -> dict[str, Any]:
+        """The document and its results; rolled back to `upto`, the features after it have none."""
         with self.lock:
-            ev = self.ensure_evaluated()
+            ev, revision = self.evaluated(upto)
             out = self.document.to_json()
             out["id"] = self.id
-            out["revision"] = self._revision
+            out["revision"] = revision
             out["names"] = self.names()
             out["evaluation"] = ev.to_json()
             try:
@@ -886,15 +909,15 @@ class Workspace:
         with doc.lock:
             from . import compare as pcompare
 
-            base = doc.evaluation_for(upto)
+            base, revision = doc.evaluated(upto)
             other_doc = pcompare.other_document(doc.path, other, rev)
-            key = f"{doc.id}|{doc._revision}|{dependencies.revision(other_doc)}|{upto}"
+            key = f"{doc.id}|{revision}|{dependencies.revision(other_doc)}|{upto}"
             hit = self._compares.get(key)
             if hit is None:
                 if not base.has_geometry:
                     raise pcompare.CompareError("the document has no geometry to compare")
                 hit = pcompare.compare(base, evaluate(other_doc, upto=upto))
-                hit = ({**hit[0], "hash": doc.hash, "revision": doc._revision}, hit[1])
+                hit = ({**hit[0], "hash": doc.hash, "revision": revision}, hit[1])
                 if len(self._compares) > 4:
                     self._compares.pop(next(iter(self._compares)))
                 self._compares[key] = hit

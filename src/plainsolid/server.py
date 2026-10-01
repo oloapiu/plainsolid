@@ -385,8 +385,9 @@ def create_app(root: str | Path | None = None, serve_client: bool = True) -> Fas
         return await run(doc.tree_json)
 
     @app.get("/api/documents/{doc_id}/tree")
-    async def tree(doc_id: str) -> dict[str, Any]:
-        return await run(_doc(doc_id).tree_json)
+    async def tree(doc_id: str, upto: str | None = None) -> dict[str, Any]:
+        """The tree; with `upto` (a sketch being edited) evaluated no further than that feature."""
+        return await run(_doc(doc_id).tree_json, upto)
 
     @app.get("/api/documents/{doc_id}/source")
     def get_source(doc_id: str) -> dict[str, Any]:
@@ -444,11 +445,11 @@ def create_app(root: str | Path | None = None, serve_client: bool = True) -> Fas
 
         def work() -> dict[str, Any]:
             with d.lock:
-                ev = d.evaluation_for(upto)
+                ev, revision = d.evaluated(upto)
                 kwargs: dict[str, Any] = {}
                 if kind == "mass":
                     kwargs = {"material": material, "density": density}
-                return {**pquery.run(ev, kind, **kwargs), "revision": d._revision}
+                return {**pquery.run(ev, kind, **kwargs), "revision": revision}
         return await run(work)
 
     @app.post("/api/documents/{doc_id}/measure")

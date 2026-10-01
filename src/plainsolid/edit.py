@@ -343,6 +343,13 @@ def add_sketch_entity(src: str, sketch_name: str, statement_text: str) -> str:
     if not isinstance(small, cst.Assign) or not isinstance(small.targets[0].target, cst.Name):
         raise EditError(f"sketch {sketch_name!r} is not bound to a variable")
     var = small.targets[0].target.value
+    stmt = cst.parse_statement(statement_text)
+    # a name already in the sketch would only break the evaluation: refuse it here, where an
+    # edit applied against a file its sender had not seen (a retried write) can still be caught
+    call = _stmt_call(stmt)
+    named = _name_arg(call, module) if call is not None else None
+    if named is not None and named[1] and any(n == named[0] for *_, n in _sketch_statements(module, sketch_name)):
+        raise EditError(f"{named[0]!r} already exists in sketch {sketch_name!r}")
     # Insert after the last entity statement of this sketch (a call on the sketch
     # variable), not after any statement mentioning it: an extrude consuming the
     # sketch must stay below the sketch's entities.
@@ -352,7 +359,7 @@ def add_sketch_entity(src: str, sketch_name: str, statement_text: str) -> str:
         if call is not None and m.matches(call.func, m.Attribute(value=m.Name(var))):
             last = i
     body = list(module.body)
-    body.insert(last + 1, cst.parse_statement(statement_text))
+    body.insert(last + 1, stmt)
     return module.with_changes(body=body).code
 
 

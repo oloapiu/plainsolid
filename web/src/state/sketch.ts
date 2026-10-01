@@ -1,7 +1,7 @@
 import { api } from '../api/client';
 import { CONSTRAINT_PREFIX, takenNames, sideNames } from '../sketch/model';
 import { set, state } from './core';
-import { edit } from './documents';
+import { edit, refetch } from './documents';
 import { fetchGhost } from './geometry';
 import { featureByName, featurePreviews, nextName, selectorTarget, setStatus, setUpto } from './tools';
 import type { EditOp, Feature, JsonValue, PickedEntity, PlaneInfo, SketchSolution, Tree } from '../api/types';
@@ -83,8 +83,8 @@ export function setSketchTool(tool: SketchTool) {
 export function exitSketch() {
   cancelDragPreview();
   featurePreviews.cancel();
-  set({ sketchMode: null, ghostMesh: null, ghostStyle: 'ghost', previewNote: null, ortho: state.orthoBeforeSketch ?? state.ortho, orthoBeforeSketch: null, hover: null });
-  if (state.upto) setUpto(null);
+  set({ sketchMode: null, ghostMesh: null, ghostStyle: 'ghost', previewNote: null, ortho: state.orthoBeforeSketch ?? state.ortho, orthoBeforeSketch: null, hover: null, upto: null });
+  void refetch();  // the whole model again: the features after the sketch rebuild now, once
 }
 
 export function setSketchSelection(selection: string[]) { patchSketch({ selection, dimLock: null }); }
@@ -245,8 +245,8 @@ export async function placeDimensionLabel(name: string, p: [number, number]) {
   if (await edit({ op: 'set_constraint_argument', sketch: sm.sketch, constraint: name, kwarg: 'at', value: at })) setStatus(`placed ${name}`);
 }
 
-export function sketchNames(): string[] {
-  const f = featureByName(state.sketchMode?.sketch ?? null);
+export function sketchNames(sketch: string | null = state.sketchMode?.sketch ?? null): string[] {
+  const f = featureByName(sketch);
   return f ? takenNames(f) : [];
 }
 
@@ -334,10 +334,10 @@ export async function setConstraintValue(name: string, text: string) {
 }
 
 /** Several sketch ops as one commit and one undo step. */
-export async function sketchBatch(ops: EditOp[], status: string): Promise<boolean> {
-  const sm = state.sketchMode;
-  if (!sm || !ops.length) return false;
-  const ok = ops.length === 1 ? await edit(ops[0]) : await edit({ op: 'batch', sketch: sm.sketch, ops });
+/** One commit of sketch ops; `sketch` names the sketch when the commit may land after its exit. */
+export async function sketchBatch(ops: EditOp[], status: string, sketch: string | null = state.sketchMode?.sketch ?? null): Promise<boolean> {
+  if (!sketch || !ops.length) return false;
+  const ok = ops.length === 1 ? await edit(ops[0]) : await edit({ op: 'batch', sketch, ops });
   if (ok) setStatus(status);
   return ok;
 }
