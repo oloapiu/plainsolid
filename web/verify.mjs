@@ -576,19 +576,21 @@ await page.waitForSelector('[data-testid=param-list]');
   check('dragging a dimension label writes at= on its statement', placedAt !== null && Number(placedAt[2]) < 27 && Number(placedAt[2]) > 10,
     readFile().match(/profile\.length\("len1".*/)?.[0] ?? 'no statement');
 
-  // construction geometry: toggle a profile line to construction (the profile opens, the extrude fails), then back
+  // construction geometry: toggle a profile line to construction (the profile opens, the extrude fails), then back.
+  // An edited sketch is evaluated up to itself, so the extrude after it is read from the whole model.
+  const wholeTree = () => page.evaluate(async () => (await fetch(`/api/documents/${window.__plainsolid.getState().docId}/tree`)).json());
   await page.evaluate(() => window.__plainsolid.actions.setSketchSelection(['inner_bottom']));
   await page.waitForSelector('[data-testid=constrain-construction]', { timeout: 5000 });
   h = (await st()).hash;
   await page.click('[data-testid=constrain-construction]'); await waitHash(h);
-  const openBody = (await st()).tree.features.find((f) => f.name === 'body');
+  const openBody = (await wholeTree()).features.find((f) => f.name === 'body');
   const wroteConstruction = /profile\.line\("inner_bottom", .*construction=True\)/.test(readFile());
   await page.evaluate(() => window.__plainsolid.actions.setSketchSelection(['inner_bottom']));
   await page.waitForSelector('[data-testid=constrain-construction].active', { timeout: 5000 });
   h = (await st()).hash;
   await page.click('[data-testid=constrain-construction]'); await waitHash(h);
   const s4 = await st();
-  const closedBody = s4.tree.features.find((f) => f.name === 'body');
+  const closedBody = (await wholeTree()).features.find((f) => f.name === 'body');
   const backEntity = s4.tree.features.find((f) => f.name === 'profile').entities.find((e) => e.name === 'inner_bottom');
   // the server's set_entity_argument keeps the keyword as construction=False rather than dropping it
   check('toggling a profile line to construction writes construction=True, opens the profile, and toggling back closes it',
