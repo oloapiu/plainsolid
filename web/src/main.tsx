@@ -4,6 +4,7 @@ import { App } from './App';
 import { getState, setSection, selectFace, addSketchOn, setShowPlanes, openPlaneDialog, setSketchSelection, openFeatureDialog, pick, select, edit, setOrtho, setSketchTool, useBodyInRelation, exitSketch, addInstance, addMate, fixInstance, fetchAssemblyQueries, selectorTarget, makeEditable, closeDocument, exportDocument, explodeImport, setDrawingTool, drawingPick, placeDimension, addNoteAt, moveDrawingItem, addView, openDocument, newDocument, setTool, setMoveMode, previewMate, clearPosePreview, beginInstanceDrag, moveInstanceDrag, endInstanceDrag, toggleBodySelect, convertBodySelection, previewFeature, clearFeaturePreview, setOverlay, setError, openHint, askHint, acceptHint, dismissHint, loadSuggestStatus } from './state/store';
 import { uiContext } from './viewport/HintBox';
 import type { EntityKind } from './api/types';
+import { Vector3 } from 'three';
 import { sceneRef } from './viewport/Viewport';
 import { frameFromInfo } from './viewport/scene';
 import { toWorld } from './sketch/draw';
@@ -43,6 +44,14 @@ import './styles.css';
     pickEntity: (kind: EntityKind, id: number) => { const scene = sceneRef.current; if (scene) scene.onPick({ kind, id }); else pick({ kind, id }, null); },
   },
   /** Screen position (px in the canvas) of a sketch-plane point, in sketch mode. */
+  /** Screen position (px in the page) of a world point, as the camera shows it now. */
+  worldToScreen: (x: number, y: number, z: number) => {
+    const scene = sceneRef.current;
+    if (!scene) return null;
+    const [sx, sy] = scene.toScreen(new Vector3(x, y, z));
+    const r = scene.renderer.domElement.getBoundingClientRect();
+    return [sx + r.left, sy + r.top];
+  },
   sketchToScreen: (u: number, v: number) => {
     const scene = sceneRef.current, sm = getState().sketchMode;
     if (!scene || !sm) return null;
