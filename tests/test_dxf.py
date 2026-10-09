@@ -102,6 +102,25 @@ def test_profile_layers_gaps_blocks_and_splines(tmp_path):
     assert sum(it.kind == "line" for it in prof.items) > 10
 
 
+@pytest.mark.solver
+def test_curves_shorter_than_the_snap_distance_are_dropped(tmp_path):
+    # a polyline with a 2 µm segment (a logo traced from an image) and a 3 µm bulge: joining the
+    # ends leaves each with no length, which the kernel refuses as an edge
+    import ezdxf
+
+    doc = ezdxf.new("R2010")
+    doc.header["$INSUNITS"] = 4
+    doc.modelspace().add_lwpolyline([(0, 0, 0), (60, 0, 0), (60, 40, 0), (60.002, 40, 1), (60.005, 40, 0), (0, 40, 0)],
+                                    format="xyb", close=True)
+    doc.saveas(tmp_path / "plate.dxf")
+    prof = pdxf.read_profile(tmp_path / "plate.dxf")
+    assert sorted(it.kind for it in prof.items) == ["line"] * 4 and prof.warnings == []
+    p = tmp_path / "plate.py"
+    p.write_text(PART.format(extra="", constraints='profile.fix("placed", "outline")\n'))
+    ev = evaluate(parse_file(str(p)))
+    assert all(r.ok for r in ev.results) and ev.body.volume == pytest.approx(60.005 * 40 * 3, rel=1e-4)
+
+
 # --- a sketch -----------------------------------------------------------------------------------
 
 @pytest.mark.solver

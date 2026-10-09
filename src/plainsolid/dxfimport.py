@@ -280,6 +280,7 @@ def _join_ends(items: list[ProjItem]) -> list[str]:
     groups: dict[int, list[int]] = defaultdict(list)
     for n in range(len(ends)):
         groups[find(n)].append(n)
+    collapsed = _collapsed(items, ends, find)
     open_ends: list[Pt] = []
     for members in groups.values():
         if len(members) == 1:
@@ -290,6 +291,8 @@ def _join_ends(items: list[ProjItem]) -> list[str]:
         for n in members:
             i, k = ends[n]
             items[i] = ProjItem(items[i].kind, {**items[i].coords, k: (mx, my)})
+    if collapsed:
+        items[:] = [kept for i, it in enumerate(items) if (kept := collapsed.get(i, it)) is not None]
     if not open_ends:
         return []
     gaps: list[tuple[float, Pt, Pt]] = []
@@ -313,6 +316,23 @@ def _join_ends(items: list[ProjItem]) -> list[str]:
         shown = ", ".join(f"{_n(d)} mm at ({_n(p[0])}, {_n(p[1])})" for d, p, _q in gaps[:3])
         text += f"; {len(gaps)} gap(s) under {_n(GAP)} mm where the outline does not close: {shown}" + (" …" if len(gaps) > 3 else "")
     return [text]
+
+
+def _collapsed(items: list[ProjItem], ends: list[tuple[int, str]], find) -> dict[int, ProjItem | None]:
+    """The lines and arcs whose two ends join onto one point, being shorter than SNAP (or a run
+    of such): a line goes, its neighbours meet there already; an arc too, unless it was nearly a
+    whole circle and stays as one."""
+    node = {e: n for n, e in enumerate(ends)}
+    out: dict[int, ProjItem | None] = {}
+    for i, it in enumerate(items):
+        if it.kind not in ("line", "arc") or find(node[(i, "start")]) != find(node[(i, "end")]):
+            continue
+        out[i] = None
+        if it.kind == "arc":
+            (cx, cy), (sx, sy), (ex, ey) = it.coords["center"], it.coords["start"], it.coords["end"]
+            if (math.atan2(ey - cy, ex - cx) - math.atan2(sy - cy, sx - cx)) % (2 * math.pi) > math.pi:
+                out[i] = ProjItem("circle", {"center": it.coords["center"], "radius": it.coords["radius"]})
+    return out
 
 
 def _n(v: float) -> str:
